@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: shutl-linux-x86_64
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            artifact_name: shutl-macos-x86_64
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            artifact_name: shutl-macos-arm64
+            target: aarch64-apple-darwin
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+        components: rustfmt, clippy
+    
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+    
+    - name: Build
+      run: cargo build --release --target ${{ matrix.target }} --verbose
+    
+    - name: Create Release Archive
+      shell: bash
+      run: |
+        cd target/${{ matrix.target }}/release
+        tar czf ../../../${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}
+        cd ../../..
+    
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./${{ matrix.artifact_name }}.tar.gz
+        asset_name: ${{ matrix.artifact_name }}.tar.gz
+        asset_content_type: application/gzip 
