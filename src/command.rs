@@ -167,7 +167,7 @@ mod tests {
         let mut file = File::create(&script_path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
         // Set executable permissions
-        std::fs::set_permissions(
+        fs::set_permissions(
             &script_path,
             std::os::unix::fs::PermissionsExt::from_mode(0o755),
         )
@@ -226,11 +226,11 @@ mod tests {
     fn test_build_command_tree() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
-        std::fs::create_dir(&scripts_dir).unwrap();
+        fs::create_dir(&scripts_dir).unwrap();
 
         // Create test directory structure
         let subdir = scripts_dir.join("subdir");
-        std::fs::create_dir(&subdir).unwrap();
+        fs::create_dir(&subdir).unwrap();
 
         // Create test scripts
         create_test_script(
@@ -269,13 +269,13 @@ mod tests {
     fn test_build_command_tree_ignores_hidden() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
-        std::fs::create_dir(&scripts_dir).unwrap();
+        fs::create_dir(&scripts_dir).unwrap();
 
         // Create visible and hidden directories
         let visible_dir = scripts_dir.join("visible");
         let hidden_dir = scripts_dir.join(".hidden");
-        std::fs::create_dir(&visible_dir).unwrap();
-        std::fs::create_dir(&hidden_dir).unwrap();
+        fs::create_dir(&visible_dir).unwrap();
+        fs::create_dir(&hidden_dir).unwrap();
 
         // Create visible and hidden scripts
         create_test_script(
@@ -335,7 +335,7 @@ mod tests {
     fn test_new_command_script_names() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
-        std::fs::create_dir(&scripts_dir).unwrap();
+        fs::create_dir(&scripts_dir).unwrap();
 
         // Test creating script without .sh extension
         let script1 = create_test_script(
@@ -358,21 +358,21 @@ mod tests {
 
         // Test creating script in subdirectory
         let subdir = scripts_dir.join("subdir");
-        std::fs::create_dir(&subdir).unwrap();
+        fs::create_dir(&subdir).unwrap();
         let script3 = create_test_script(&subdir, "test3.sh", "#!/bin/bash\n#@description: test3");
         assert_eq!(script3.file_name().unwrap().to_str().unwrap(), "test3.sh");
 
         // Verify all scripts are executable
-        assert!(script1.metadata().unwrap().permissions().mode() & 0o111 != 0);
-        assert!(script2.metadata().unwrap().permissions().mode() & 0o111 != 0);
-        assert!(script3.metadata().unwrap().permissions().mode() & 0o111 != 0);
+        assert_ne!(script1.metadata().unwrap().permissions().mode() & 0o111, 0);
+        assert_ne!(script2.metadata().unwrap().permissions().mode() & 0o111, 0);
+        assert_ne!(script3.metadata().unwrap().permissions().mode() & 0o111, 0);
 
         // Verify script contents
-        let content1 = std::fs::read_to_string(&script1).unwrap();
+        let content1 = fs::read_to_string(&script1).unwrap();
         assert!(content1.contains("#@description: test1"));
-        let content2 = std::fs::read_to_string(&script2).unwrap();
+        let content2 = fs::read_to_string(&script2).unwrap();
         assert!(content2.contains("#@description: test2"));
-        let content3 = std::fs::read_to_string(&script3).unwrap();
+        let content3 = fs::read_to_string(&script3).unwrap();
         assert!(content3.contains("#@description: test3"));
     }
 
@@ -380,7 +380,7 @@ mod tests {
     fn test_duplicate_script_names() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
-        std::fs::create_dir(&scripts_dir).unwrap();
+        fs::create_dir(&scripts_dir).unwrap();
 
         // Create two scripts with similar names
         create_test_script(
@@ -424,12 +424,12 @@ mod tests {
     fn test_edit_command() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
-        std::fs::create_dir(&scripts_dir).unwrap();
+        fs::create_dir(&scripts_dir).unwrap();
 
         // Create a nested directory structure
         let subdir = scripts_dir.join("subdir");
         let subsubdir = subdir.join("subsubdir");
-        std::fs::create_dir_all(&subsubdir).unwrap();
+        fs::create_dir_all(&subsubdir).unwrap();
 
         // Create test scripts at different levels
         let root_script = create_test_script(

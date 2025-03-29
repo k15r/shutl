@@ -1,6 +1,10 @@
-# Shutl
+# ![Shutl Logo](assets/logo-xs.png) Shutl
 
-A powerful CLI tool that dynamically maps commands to shell scripts, making it easy to create and manage command-line tools from shell scripts.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+A powerful CLI tool that dynamically maps commands to shell scripts, making it easy to create and manage command-line tools from shell scripts. Enhance your command-line experience with command completion.
+
+[![asciicast](https://asciinema.org/a/710656.svg)](https://asciinema.org/a/710656)
 
 ## Features
 
@@ -30,37 +34,68 @@ Create shell scripts in the `~/.shutl` directory with metadata comments:
 
 ```bash
 #!/bin/bash
-#@description: My awesome command
+#@description: Example command with various metadata
 #@arg:input - Input file path
-#@flag:verbose - Enable verbose output
-#@flag:force - Force the operation (default: false)
+#@arg:output - Output file path [default:output.txt]
+#@flag:host - Host name [default:localhost]
+#@bool:dry-run - Perform a dry run [default:false]
+#@arg:... - Additional arguments
 
 # Your script logic here
+if [ "$CLI_DRY_RUN" = true ]; then
+  echo "Dry run mode enabled"
+fi
+
+echo "Hostname: ${CLI_HOST}"
+
+echo "Processing input file: $CLI_INPUT"
+echo "Output will be saved to: $CLI_OUTPUT"
+
+# Handle additional arguments
+if [ "$#" -gt 0 ]; then
+  echo "Additional arguments: $CLI_ADDITIONAL_ARGS"
+fi
 ```
+
+### Command Completion
+To enable command completion, add the following to your shell configuration file (e.g., `.bashrc`, `.zshrc`):
+
+#### bash:
+```bash
+. <(COMPLETE=bash shutl)
+```
+
+#### zsh:
+```bash
+. <(COMPLETE=zsh shutl)
+``` 
 
 ### Metadata Syntax
 
-- **Description**: `#@description: Your command description`
-- **Arguments**: `#@arg:name - Argument description`
-- **Flags**: `#@flag:name - Flag description (default: value)`
-- **Catch-all**: `#@catch-all: Additional arguments description`
+| **Metadata**  | **Syntax**                                                |
+|---------------|-----------------------------------------------------------|
+| Description   | `#@description: Your command description`                 |
+| Arguments     | `#@arg:name - Argument description`                       |
+| Catch-all     | `#@arg:... - Additional arguments description`            |
+| Flags         | `#@flag:name - Flag description [default:value,required]` |
+| Boolean       | `#@bool:name - Boolean flag description [default:value]`  |
 
 ### Running Commands
 
 ```bash
 # Basic usage
-shutl my-command --input file.txt
+shutl example-command --input file.txt
 
 # With flags
-shutl my-command --verbose --force
+shutl example-command --input file.txt --host example.com --dry-run
 
 # Using negated flags
-shutl my-command --no-verbose
+shutl example-command --input file.txt --no-dry-run
 ```
 
 ## Project Structure
 
-```
+```bash
 shutl/
 ├── src/              # Rust source code
 └── Cargo.toml        # Project dependencies
