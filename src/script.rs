@@ -1,6 +1,7 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::ArgMatches;
+use is_executable::IsExecutable;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
@@ -15,9 +16,16 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
         _ => "bash", // Default to bash for files without extension
     };
 
-    // Build the command with the appropriate interpreter
     let mut command = ProcessCommand::new(interpreter);
     command.arg(script_path);
+
+    // Check if the script is executable
+    // if it is executable use it directly
+    if script_path.is_executable() {
+        command = ProcessCommand::new(script_path);
+    }
+
+    // Build the command with the appropriate interpreter
 
     let metadata = parse_command_metadata(script_path);
 
