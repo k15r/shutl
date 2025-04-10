@@ -1,9 +1,9 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::ArgMatches;
+use is_executable::IsExecutable;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
-use is_executable::IsExecutable;
 
 /// Executes a script with the provided arguments
 pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Result<()> {
@@ -24,7 +24,6 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
     if script_path.is_executable() {
         command = ProcessCommand::new(script_path);
     }
-
 
     // Build the command with the appropriate interpreter
 
