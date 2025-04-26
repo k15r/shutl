@@ -54,31 +54,31 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 
     // Add flags
-    for (name, description, required, is_bool, default, options) in &metadata.flags {
-        let mut arg = Arg::new(name).help(description).long(name);
+    for flag in &metadata.flags {
+        let mut arg = Arg::new(&flag.name).help(&flag.description).long(&flag.name);
 
-        if *is_bool {
+        if flag.is_bool {
             arg = arg.action(clap::ArgAction::SetTrue);
             // Add negated version for boolean flags
-            let negated_name = format!("no-{}", name);
+            let negated_name = format!("no-{}", flag.name);
             cmd = cmd.arg(
                 Arg::new(&negated_name)
-                    .help(format!("Disable the '{}' flag", name))
+                    .help(format!("Disable the '{}' flag", flag.name))
                     .long(&negated_name)
                     .action(clap::ArgAction::SetTrue),
 
             );
         } else {
-            if let Some(default_value) = default {
+            if let Some(default_value) = &flag.default {
                 arg = arg.default_value(default_value);
             }
-            if !options.is_empty() {
-                arg = arg.value_parser(clap::builder::PossibleValuesParser::new(options));
+            if !flag.options.is_empty() {
+                arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&flag.options));
             }
         }
 
 
-        if *required {
+        if flag.required {
             arg = arg.required(true);
         }
 
