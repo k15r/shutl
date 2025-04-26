@@ -55,7 +55,9 @@ fn build_script_command(path: &Path) -> CommandWithPath {
 
     // Add flags
     for flag in &metadata.flags {
-        let mut arg = Arg::new(&flag.name).help(&flag.description).long(&flag.name);
+        let mut arg = Arg::new(&flag.name)
+            .help(&flag.description)
+            .long(&flag.name);
 
         if flag.is_bool {
             arg = arg.action(clap::ArgAction::SetTrue);
@@ -66,7 +68,6 @@ fn build_script_command(path: &Path) -> CommandWithPath {
                     .help(format!("Disable the '{}' flag", flag.name))
                     .long(&negated_name)
                     .action(clap::ArgAction::SetTrue),
-
             );
         } else {
             if let Some(default_value) = &flag.default {
@@ -76,7 +77,6 @@ fn build_script_command(path: &Path) -> CommandWithPath {
                 arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&flag.options));
             }
         }
-
 
         if flag.required {
             arg = arg.required(true);

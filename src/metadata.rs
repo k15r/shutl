@@ -119,7 +119,6 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
                                         for part in parts {
                                             options.push(part.trim().to_string());
                                         }
-
                                     } else if key.trim() == "default" {
                                         default = Some(value.trim().to_string());
                                     }
@@ -209,7 +208,7 @@ mod tests {
         assert_eq!(metadata.flags.len(), 5);
 
         // Test verbose flag
-        let verbose_flag =  &metadata.flags[0];
+        let verbose_flag = &metadata.flags[0];
         assert_eq!(verbose_flag.name, "verbose");
         assert_eq!(verbose_flag.description, "Enable verbose output");
         assert!(verbose_flag.required);
@@ -218,7 +217,7 @@ mod tests {
 
         // Test dry-run flag
         let dry_run_flag = &metadata.flags[1];
-            &metadata.flags[1];
+        &metadata.flags[1];
         assert_eq!(dry_run_flag.name, "dry-run");
         assert_eq!(dry_run_flag.description, "Perform a dry run");
         assert!(!dry_run_flag.required);
@@ -240,7 +239,10 @@ mod tests {
         assert!(!extra_flag.required);
         assert!(!extra_flag.is_bool);
         assert_eq!(extra_flag.default.as_deref(), Some("opt1"));
-        assert_eq!(&extra_flag.options, &vec!["opt1".to_string(), "opt2".to_string()]);
+        assert_eq!(
+            &extra_flag.options,
+            &vec!["opt1".to_string(), "opt2".to_string()]
+        );
 
         let debug_flag = &metadata.flags[4];
         assert_eq!(debug_flag.name, "debug");
