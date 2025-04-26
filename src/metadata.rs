@@ -217,7 +217,6 @@ mod tests {
 
         // Test dry-run flag
         let dry_run_flag = &metadata.flags[1];
-        &metadata.flags[1];
         assert_eq!(dry_run_flag.name, "dry-run");
         assert_eq!(dry_run_flag.description, "Perform a dry run");
         assert!(!dry_run_flag.required);
