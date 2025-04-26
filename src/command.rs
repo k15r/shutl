@@ -54,24 +54,31 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 
     // Add flags
-    for (name, description, required, is_bool, default) in &metadata.flags {
-        let mut arg = Arg::new(name).help(description).long(name);
+    for flag in &metadata.flags {
+        let mut arg = Arg::new(&flag.name)
+            .help(&flag.description)
+            .long(&flag.name);
 
-        if *is_bool {
+        if flag.is_bool {
             arg = arg.action(clap::ArgAction::SetTrue);
             // Add negated version for boolean flags
-            let negated_name = format!("no-{}", name);
+            let negated_name = format!("no-{}", flag.name);
             cmd = cmd.arg(
                 Arg::new(&negated_name)
-                    .help(format!("Disable the '{}' flag", name))
+                    .help(format!("Disable the '{}' flag", flag.name))
                     .long(&negated_name)
                     .action(clap::ArgAction::SetTrue),
             );
-        } else if let Some(default_value) = default {
-            arg = arg.default_value(default_value);
+        } else {
+            if let Some(default_value) = &flag.default {
+                arg = arg.default_value(default_value);
+            }
+            if !flag.options.is_empty() {
+                arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&flag.options));
+            }
         }
 
-        if *required {
+        if flag.required {
             arg = arg.required(true);
         }
 
@@ -143,7 +150,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 /// Builds the complete CLI command structure
 pub fn build_cli_command() -> Command {
     let mut cli = Command::new("shutl")
-        .about("A CLI tool that dynamically maps commands to shell scripts")
+        .about("A command-line tool for organizing, managing, and executing scripts as commands.")
         .hide(true); // Hide the help command
 
     for cmd_with_path in build_command_tree(&get_scripts_dir()) {
@@ -280,12 +287,12 @@ mod tests {
         // Create visible and hidden scripts
         create_test_script(
             &scripts_dir,
-            "visible.sh",
+            "visible_script.sh",
             "#!/bin/bash\n#@description: Visible script",
         );
         create_test_script(
             &scripts_dir,
-            ".hidden.sh",
+            ".hidden_script.sh",
             "#!/bin/bash\n#@description: Hidden script",
         );
         create_test_script(

@@ -2,7 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A powerful CLI tool that dynamically maps commands to shell scripts, making it easy to create and manage command-line tools from shell scripts. Enhance your command-line experience with command completion.
+A command-line tool for organizing, managing, and executing scripts as commands. 
+Using command completion it provides a user-friendly interface for running shell scripts with metadata-driven arguments and flags.
 
 [![asciicast](https://asciinema.org/a/710656.svg)](https://asciinema.org/a/710656)
 

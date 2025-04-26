@@ -43,31 +43,31 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
     }
 
     // Add flags as environment variables
-    for (flag_name, _, _, is_bool, default) in metadata.flags {
-        let env_name = format!("CLI_{}", flag_name.replace('-', "_").to_uppercase());
-        let value = if is_bool {
+    for flag in metadata.flags {
+        let env_name = format!("CLI_{}", flag.name.replace('-', "_").to_uppercase());
+        let value = if flag.is_bool {
             // For boolean flags:
             // - If --no-flag is specified, set to false
             // - If --flag is specified, set to true
             // - If neither is specified, use default value
-            let negated_name = format!("no-{}", flag_name);
+            let negated_name = format!("no-{}", flag.name);
             if matches.get_flag(&negated_name) {
                 "false"
-            } else if matches.get_flag(&flag_name) {
+            } else if matches.get_flag(&flag.name) {
                 "true"
-            } else if let Some(ref default_value) = default {
+            } else if let Some(ref default_value) = flag.default {
                 default_value.as_str()
             } else {
                 "false"
             }
         } else {
             // For non-boolean flags, use the provided value or default
-            if matches.contains_id(&flag_name) {
+            if matches.contains_id(&flag.name) {
                 matches
-                    .get_one::<String>(&flag_name)
+                    .get_one::<String>(&flag.name)
                     .map(|s| s.as_str())
                     .unwrap_or("")
-            } else if let Some(ref default_value) = default {
+            } else if let Some(ref default_value) = flag.default {
                 default_value.as_str()
             } else {
                 ""

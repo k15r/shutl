@@ -13,14 +13,15 @@ fn main() {
         clap::Command::new("new")
             .about("Create a new script")
             .arg(
-                clap::Arg::new("name")
-                    .help("Name of the script (without .sh extension)")
+                clap::Arg::new("location")
+                    .help("Location to create the script (relative to ~/.shutl)")
+                    .default_value("")
                     .required(true),
             )
             .arg(
-                clap::Arg::new("location")
-                    .help("Location to create the script (relative to ~/.shutl)")
-                    .default_value(""),
+                clap::Arg::new("name")
+                    .help("Name of the script (without .sh extension)")
+                    .required(true),
             )
             .arg(
                 clap::Arg::new("editor")
