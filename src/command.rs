@@ -150,7 +150,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 /// Builds the complete CLI command structure
 pub fn build_cli_command() -> Command {
     let mut cli = Command::new("shutl")
-        .about("A CLI tool that dynamically maps commands to shell scripts")
+        .about("A command-line tool for organizing, managing, and executing scripts as commands.")
         .hide(true); // Hide the help command
 
     for cmd_with_path in build_command_tree(&get_scripts_dir()) {
@@ -287,12 +287,12 @@ mod tests {
         // Create visible and hidden scripts
         create_test_script(
             &scripts_dir,
-            "visible.sh",
+            "visible_script.sh",
             "#!/bin/bash\n#@description: Visible script",
         );
         create_test_script(
             &scripts_dir,
-            ".hidden.sh",
+            ".hidden_script.sh",
             "#!/bin/bash\n#@description: Hidden script",
         );
         create_test_script(
