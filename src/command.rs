@@ -54,7 +54,7 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 
     // Add flags
-    for (name, description, required, is_bool, default) in &metadata.flags {
+    for (name, description, required, is_bool, default, options) in &metadata.flags {
         let mut arg = Arg::new(name).help(description).long(name);
 
         if *is_bool {
@@ -66,10 +66,17 @@ fn build_script_command(path: &Path) -> CommandWithPath {
                     .help(format!("Disable the '{}' flag", name))
                     .long(&negated_name)
                     .action(clap::ArgAction::SetTrue),
+
             );
-        } else if let Some(default_value) = default {
-            arg = arg.default_value(default_value);
+        } else {
+            if let Some(default_value) = default {
+                arg = arg.default_value(default_value);
+            }
+            if !options.is_empty() {
+                arg = arg.value_parser(clap::builder::PossibleValuesParser::new(options));
+            }
         }
+
 
         if *required {
             arg = arg.required(true);

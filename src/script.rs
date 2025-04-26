@@ -43,7 +43,7 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
     }
 
     // Add flags as environment variables
-    for (flag_name, _, _, is_bool, default) in metadata.flags {
+    for (flag_name, _, _, is_bool, default, options) in metadata.flags {
         let env_name = format!("CLI_{}", flag_name.replace('-', "_").to_uppercase());
         let value = if is_bool {
             // For boolean flags:

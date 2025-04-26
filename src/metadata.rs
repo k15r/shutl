@@ -6,13 +6,20 @@ use std::path::Path;
 pub struct CommandMetadata {
     pub description: String,
     pub args: Vec<(String, String, Option<String>)>, // (name, description, default)
-    pub flags: Vec<(String, String, bool, bool, Option<String>)>, // (name, description, required, is_bool, default)
+    pub flags: Vec<(String, String, bool, bool, Option<String>, Vec<String>)>, // (name, description, required, is_bool, default, options)
     pub catch_all: Option<(String, String)>, // (name, description) for catching remaining arguments
 }
 
 /// Parses command metadata from a shell script
 pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     let mut metadata = CommandMetadata::default();
+
+    // derive the comment prefix based on the file extension
+    let comment_prefix = match path.extension().and_then(|ext| ext.to_str()) {
+        // just the exceptions from the default
+        Some("js") => "//@",
+        _ => "#@", // Default to bash-style comments
+    };
 
     if let Ok(contents) = fs::read_to_string(path) {
         // Look for metadata in consecutive comment lines at the start of the file
@@ -26,8 +33,8 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
         }
 
         // Parse consecutive comment lines
-        while i < lines.len() && lines[i].starts_with("#@") {
-            let line = lines[i].trim_start_matches("#@").trim();
+        while i < lines.len() && lines[i].starts_with(comment_prefix) {
+            let line = lines[i].trim_start_matches(comment_prefix).trim();
 
             // Parse description
             if line.starts_with("description:") {
@@ -85,6 +92,7 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
                     let mut desc = desc.trim().to_string();
                     let mut required = false;
                     let mut default = None;
+                    let mut options: Vec<String> = Vec::new();
 
                     // Parse attributes from brackets
                     if let Some(attrs_start) = desc.find('[') {
@@ -97,7 +105,13 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
                                 if attr == "required" {
                                     required = true;
                                 } else if let Some((key, value)) = attr.split_once(':') {
-                                    if key.trim() == "default" {
+                                    if key.trim() == "options" {
+                                        let parts = value.split('|');
+                                        for part in parts {
+                                            options.push(part.trim().to_string());
+                                        }
+
+                                    } else if key.trim() == "default" {
                                         default = Some(value.trim().to_string());
                                     }
                                 }
@@ -110,7 +124,7 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
 
                     metadata
                         .flags
-                        .push((name, desc, required, is_bool, default));
+                        .push((name, desc, required, is_bool, default, options));
                 }
             }
 
@@ -145,6 +159,7 @@ mod tests {
 #@flag:verbose - Enable verbose output [required]
 #@bool:dry-run - Perform a dry run [default:false]
 #@flag:output-dir - Directory for output files [required, default:./output]
+#@flag:extra - Extra flag [default:opt1, options:opt1|opt2]
 "#;
 
         let dir = tempdir().unwrap();
@@ -176,10 +191,10 @@ mod tests {
         assert_eq!(catch_all_desc, "Additional arguments");
 
         // Test flags
-        assert_eq!(metadata.flags.len(), 3);
+        assert_eq!(metadata.flags.len(), 4);
 
         // Test verbose flag
-        let (verbose_name, verbose_desc, verbose_required, verbose_is_bool, verbose_default) =
+        let (verbose_name, verbose_desc, verbose_required, verbose_is_bool, verbose_default, verbose_options) =
             &metadata.flags[0];
         assert_eq!(verbose_name, "verbose");
         assert_eq!(verbose_desc, "Enable verbose output");
@@ -188,7 +203,7 @@ mod tests {
         assert!(verbose_default.is_none());
 
         // Test dry-run flag
-        let (dry_run_name, dry_run_desc, dry_run_required, dry_run_is_bool, dry_run_default) =
+        let (dry_run_name, dry_run_desc, dry_run_required, dry_run_is_bool, dry_run_default, dry_run_options) =
             &metadata.flags[1];
         assert_eq!(dry_run_name, "dry-run");
         assert_eq!(dry_run_desc, "Perform a dry run");
@@ -203,11 +218,27 @@ mod tests {
             output_dir_required,
             output_dir_is_bool,
             output_dir_default,
+            output_dir_options,
         ) = &metadata.flags[2];
         assert_eq!(output_dir_name, "output-dir");
         assert_eq!(output_dir_desc, "Directory for output files");
         assert!(output_dir_required);
         assert!(!output_dir_is_bool);
         assert_eq!(output_dir_default.as_deref(), Some("./output"));
+
+        // Test extra flag
+        let (extra_name,
+            extra_desc,
+            extra_required,
+            extra_is_bool,
+            extra_default,
+            extra_options
+        ) = &metadata.flags[3];
+        assert_eq!(extra_name, "extra");
+        assert_eq!(extra_desc, "Extra flag");
+        assert!(!extra_required);
+        assert!(!extra_is_bool);
+        assert_eq!(extra_default.as_deref(), Some("opt1"));
+        assert_eq!(extra_options, &vec!["opt1".to_string(), "opt2".to_string()]);
     }
 }
