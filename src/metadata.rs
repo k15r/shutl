@@ -5,9 +5,15 @@ use std::path::Path;
 #[derive(Default)]
 pub struct CommandMetadata {
     pub description: String,
-    pub args: Vec<(String, String, Option<String>)>, // (name, description, default)
+    pub args: Vec<Arg>,                      // (name, description, default)
     pub flags: Vec<Flag>, // (name, description, required, is_bool, default, options)
     pub catch_all: Option<(String, String)>, // (name, description) for catching remaining arguments
+}
+
+pub struct Arg {
+    pub name: String,
+    pub description: String,
+    pub default: Option<String>,
 }
 
 pub struct Flag {
@@ -84,7 +90,11 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
                         } else {
                             None
                         };
-                        metadata.args.push((name, desc, default));
+                        metadata.args.push(Arg {
+                            name: name,
+                            description: desc,
+                            default: default,
+                        });
                     }
                 }
             }
@@ -188,15 +198,15 @@ mod tests {
 
         // Test arguments
         assert_eq!(metadata.args.len(), 2);
-        let (input_name, input_desc, input_default) = &metadata.args[0];
-        assert_eq!(input_name, "input");
-        assert_eq!(input_desc, "Input file path");
-        assert!(input_default.is_none());
+        let input_arg= &metadata.args[0];
+        assert_eq!(input_arg.name, "input");
+        assert_eq!(input_arg.description, "Input file path");
+        assert!(input_arg.default.is_none());
 
-        let (output_name, output_desc, output_default) = &metadata.args[1];
-        assert_eq!(output_name, "output");
-        assert_eq!(output_desc, "Output file path");
-        assert_eq!(output_default.as_deref(), Some("output.txt"));
+        let output_arg= &metadata.args[1];
+        assert_eq!(output_arg.name, "output");
+        assert_eq!(output_arg.description, "Output file path");
+        assert_eq!(output_arg.default.as_deref(), Some("output.txt"));
 
         // Test catch-all argument
         assert!(metadata.catch_all.is_some());

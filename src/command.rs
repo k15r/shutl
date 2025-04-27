@@ -14,15 +14,8 @@ pub struct CommandWithPath {
 fn build_script_command(path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
     let name = path.file_name().unwrap().to_string_lossy().to_string();
-    // Only strip .sh if it's the only extension
-    let name = if name.ends_with(".sh") && !name.ends_with(".sh.sh") {
-        name.trim_end_matches(".sh").to_string()
-    } else if name.ends_with(".sh.sh") {
-        // For .sh.sh files, keep the .sh extension
-        name.trim_end_matches(".sh.sh").to_string() + ".sh"
-    } else {
-        name
-    };
+    // a list of all supported extensions
+    let name = trim_supported_extensions(&name);
     let mut cmd = Command::new(&name);
 
     // Add description if available
@@ -31,10 +24,10 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 
     // Add arguments
-    for (name, description, default) in &metadata.args {
-        let mut arg = Arg::new(name).help(description);
+    for cmdarg in &metadata.args {
+        let mut arg = Arg::new(&cmdarg.name).help(&cmdarg.description);
 
-        if let Some(default_value) = default {
+        if let Some(default_value) = &cmdarg.default {
             arg = arg.default_value(default_value);
         } else {
             arg = arg.required(true);
@@ -91,6 +84,21 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 }
 
+fn trim_supported_extensions(name: &std::string::String) -> std::string::String {
+    let supported_extensions = ["sh", "py", "rb", "js"];
+    for ext in supported_extensions.iter() {
+        let extstr = format!(".{}", ext);
+        if name.ends_with(extstr.as_str()) {
+            // Check if the file has only one extension
+            return name
+                .strip_suffix(extstr.as_str())
+                .unwrap_or(name.as_str())
+                .to_string();
+        }
+    }
+    return name.to_string();
+}
+
 /// Builds a list of commands from a directory
 pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
     let mut commands = Vec::new();
@@ -135,9 +143,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
                     file_path: path,
                 });
             // } else if path.is_file() && (path.extension().map_or(false, |ext| ext == "sh") || path.extension().is_none()) {
-            } else if path.is_file()
-                && (path.extension().is_some_and(|ext| ext == "sh") || path.extension().is_none())
-            {
+            } else if path.is_file() {
                 // Add command for script
                 commands.push(build_script_command(&path));
             }
