@@ -123,10 +123,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 
         for path in directories {
             // Create a command for the directory
-            let dir_name = path
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let dir_name = path.file_name().to_string_lossy().to_string();
 
             // add the directory name to the command names
             command_names.push(dir_name.clone());
@@ -144,16 +141,13 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             // Add the directory command to our list
             commands.push(CommandWithPath {
                 command: dir_cmd,
-                file_path: path.path()
+                file_path: path.path(),
             });
         }
         // check if we have multiple files which would cause a collision
         let mut use_extension = false;
         for path in files.iter() {
-            let name = path
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let name = path.file_name().to_string_lossy().to_string();
             // a list of all supported extensions
             let clean_name = trim_supported_extensions(&name);
             // check if the name is already in the list
@@ -167,10 +161,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 
         for path in files {
             // prepare the command name
-            let name = path
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let name = path.file_name().to_string_lossy().to_string();
             // a list of all supported extensions
             if use_extension {
                 // if we have a collision, we need to use the extension
@@ -179,7 +170,10 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             } else {
                 // if we don't have a collision, we can use the clean name
                 command_names.push(trim_supported_extensions(&name));
-                commands.push(build_script_command(trim_supported_extensions(&name), &path.path()));
+                commands.push(build_script_command(
+                    trim_supported_extensions(&name),
+                    &path.path(),
+                ));
             }
         }
     }

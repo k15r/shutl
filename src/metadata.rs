@@ -34,12 +34,20 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
 
     if let Ok(contents) = fs::read_to_string(path) {
         let lines = contents.lines().collect::<Vec<_>>();
-        let mut i = if lines.first().map_or(false, |line| line.starts_with("#!")) { 1 } else { 0 };
+        let mut i = if lines.first().is_some_and(|line| line.starts_with("#!")) {
+            1
+        } else {
+            0
+        };
 
         while i < lines.len() && lines[i].starts_with(comment_prefix) {
             let line = lines[i].trim_start_matches(comment_prefix).trim();
             if line.starts_with("description:") {
-                metadata.description = line["description:".len()..].trim().to_string();
+                metadata.description = line
+                    .strip_prefix("description:")
+                    .unwrap()
+                    .trim()
+                    .to_string();
             } else if line.starts_with("arg:") {
                 parse_arg(&mut metadata, line);
             } else if line.starts_with("flag:") {
@@ -53,7 +61,10 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
 }
 
 fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
-    let (name, description) = line["flag:".len()..].trim().split_once(" - ").unwrap_or_default();
+    let (name, description) = line["flag:".len()..]
+        .trim()
+        .split_once(" - ")
+        .unwrap_or_default();
     let mut flag = Flag {
         name: name.trim().to_string(),
         description: description.to_string(),
@@ -74,7 +85,10 @@ fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
                         if let Some((key, value)) = attr.split_once(':') {
                             match key.trim() {
                                 "default" => flag.default = Some(value.trim().to_string()),
-                                "options" => flag.options = value.split('|').map(|s| s.trim().to_string()).collect(),
+                                "options" => {
+                                    flag.options =
+                                        value.split('|').map(|s| s.trim().to_string()).collect()
+                                }
                                 _ => {}
                             }
                         }
@@ -89,7 +103,7 @@ fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
 }
 
 fn parse_arg(metadata: &mut CommandMetadata, line: &str) {
-    let (name,description) = line["arg:".len()..]
+    let (name, description) = line["arg:".len()..]
         .trim()
         .split_once(" - ")
         .unwrap_or_default();

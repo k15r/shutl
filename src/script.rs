@@ -92,7 +92,10 @@ pub fn find_script_file_in_dir(
     let mut path = base_dir.to_path_buf();
 
     // Add all components except the last one as directories
-    components.iter().take(components.len() - 1).for_each(|component| path.push(component));
+    components
+        .iter()
+        .take(components.len() - 1)
+        .for_each(|component| path.push(component));
     path.push(components.last()?);
 
     // First try exact match
