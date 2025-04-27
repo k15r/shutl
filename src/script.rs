@@ -84,34 +84,35 @@ pub fn find_script_file(components: &[String]) -> Option<std::path::PathBuf> {
     find_script_file_in_dir(components, &get_scripts_dir())
 }
 
-/// Recursively finds a script file in the specified directory
 pub fn find_script_file_in_dir(
     components: &[String],
     base_dir: &Path,
 ) -> Option<std::path::PathBuf> {
     let mut path = base_dir.to_path_buf();
 
-    // Add all components except the last one as directories
-    components
-        .iter()
-        .take(components.len() - 1)
-        .for_each(|component| path.push(component));
+    // Build the path using all components except the last one
+    for component in &components[..components.len() - 1] {
+        path.push(component);
+    }
     path.push(components.last()?);
 
-    // First try exact match
+    // Check for an exact match
     if path.exists() {
         return Some(path);
     }
 
-    // If not found, try with common script extensions
-    for ext in ["sh", "py", "rb", "js"] {
-        path.set_extension(ext);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
+    // Check for files starting with the last component in the parent directory
+    path.pop();
+    std::fs::read_dir(&path)
+        .ok()?
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            entry
+                .file_name()
+                .to_str()?
+                .starts_with(components.last()?)
+                .then_some(entry.path())
+        })
 }
 
 #[cfg(test)]
