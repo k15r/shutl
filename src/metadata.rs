@@ -91,9 +91,9 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
                             None
                         };
                         metadata.args.push(Arg {
-                            name: name,
+                            name,
                             description: desc,
-                            default: default,
+                            default,
                         });
                     }
                 }

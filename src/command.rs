@@ -93,7 +93,7 @@ fn trim_supported_extensions(name: &std::string::String) -> std::string::String 
                 .to_string();
         }
     }
-    return name.to_string();
+    name.to_string()
 }
 
 /// Builds a list of commands from a directory
