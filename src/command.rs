@@ -218,7 +218,7 @@ mod tests {
         let script_content = r#"#!/bin/bash
 #@description: Test command
 #@arg:input - Input file
-#@bool:verbose - Enable verbose output
+#@flag:verbose - Enable verbose output [bool]
 "#;
 
         let dir = tempdir().unwrap();

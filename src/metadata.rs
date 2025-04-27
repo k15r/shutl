@@ -58,97 +58,12 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
 
             // Parse arguments
             if line.starts_with("arg:") {
-                let arg_line = line.replace("arg:", "").trim().to_string();
-                if let Some((name, desc)) = arg_line.split_once(" - ") {
-                    let name = name.trim().to_string();
-                    if name == "..." {
-                        // This is a catch-all argument
-                        metadata.catch_all = Some((name, desc.trim().to_string()));
-                    } else {
-                        let mut desc = desc.trim().to_string();
-                        let default = if let Some(attrs_start) = desc.find('[') {
-                            if let Some(attrs_end) = desc[attrs_start..].find(']') {
-                                let attrs = desc[attrs_start + 1..attrs_start + attrs_end].trim();
-                                let mut default_value = None;
-
-                                // Parse attributes
-                                for attr in attrs.split(',') {
-                                    let attr = attr.trim();
-                                    if let Some((key, value)) = attr.split_once(':') {
-                                        if key.trim() == "default" {
-                                            default_value = Some(value.trim().to_string());
-                                        }
-                                    }
-                                }
-
-                                // Remove the attributes from description
-                                desc = desc[..attrs_start].trim().to_string();
-                                default_value
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        metadata.args.push(Arg {
-                            name,
-                            description: desc,
-                            default,
-                        });
-                    }
-                }
+                parse_arg(&mut metadata, line);
             }
 
             // Parse flags
-            if line.starts_with("flag:") || line.starts_with("bool:") {
-                let is_bool = line.starts_with("bool:");
-                let flag_line = line
-                    .replace(if is_bool { "bool:" } else { "flag:" }, "")
-                    .trim()
-                    .to_string();
-                if let Some((name, desc)) = flag_line.split_once(" - ") {
-                    let name = name.trim().to_string();
-                    let mut desc = desc.trim().to_string();
-                    let mut required = false;
-                    let mut default = None;
-                    let mut options: Vec<String> = Vec::new();
-
-                    // Parse attributes from brackets
-                    if let Some(attrs_start) = desc.find('[') {
-                        if let Some(attrs_end) = desc[attrs_start..].find(']') {
-                            let attrs = desc[attrs_start + 1..attrs_start + attrs_end].trim();
-
-                            // Parse attributes
-                            for attr in attrs.split(',') {
-                                let attr = attr.trim();
-                                if attr == "required" {
-                                    required = true;
-                                } else if let Some((key, value)) = attr.split_once(':') {
-                                    if key.trim() == "options" {
-                                        let parts = value.split('|');
-                                        for part in parts {
-                                            options.push(part.trim().to_string());
-                                        }
-                                    } else if key.trim() == "default" {
-                                        default = Some(value.trim().to_string());
-                                    }
-                                }
-                            }
-
-                            // Remove the attributes from description
-                            desc = desc[..attrs_start].trim().to_string();
-                        }
-                    }
-
-                    metadata.flags.push(Flag {
-                        name,
-                        description: desc,
-                        required,
-                        is_bool,
-                        default,
-                        options,
-                    });
-                }
+            if line.starts_with("flag:") {
+                parse_flag(&mut metadata, line);
             }
 
             i += 1;
@@ -156,6 +71,99 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     }
 
     metadata
+}
+
+fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
+    let flag_line = line.replace("flag:", "").trim().to_string();
+    if let Some((name, desc)) = flag_line.split_once(" - ") {
+        let name = name.trim().to_string();
+        let mut description = desc.trim().to_string();
+        let mut required = false;
+        let mut default = None;
+        let mut is_bool = false;
+        let mut options: Vec<String> = Vec::new();
+
+        // Parse attributes from brackets
+        if let Some(attrs_start) = description.find('[') {
+            if let Some(attrs_end) = description[attrs_start..].find(']') {
+                let attrs = description[attrs_start + 1..attrs_start + attrs_end].trim();
+
+                // Parse attributes
+                for attr in attrs.split(',') {
+                    let attr = attr.trim();
+                    if attr == "bool" {
+                        is_bool = true;
+                    }
+                    if attr == "required" {
+                        required = true;
+                    } else if let Some((key, value)) = attr.split_once(':') {
+                        if key.trim() == "options" {
+                            let parts = value.split('|');
+                            for part in parts {
+                                options.push(part.trim().to_string());
+                            }
+                        } else if key.trim() == "default" {
+                            default = Some(value.trim().to_string());
+                        }
+                    }
+                }
+
+                // Remove the attributes from description
+                description = description[..attrs_start].trim().to_string();
+            }
+        }
+
+        metadata.flags.push(Flag {
+            name,
+            description,
+            required,
+            is_bool,
+            default,
+            options,
+        });
+    }
+}
+
+fn parse_arg(metadata: &mut CommandMetadata, line: &str) {
+    let arg_line = line.replace("arg:", "").trim().to_string();
+    if let Some((name, desc)) = arg_line.split_once(" - ") {
+        let name = name.trim().to_string();
+        if name == "..." {
+            // This is a catch-all argument
+            metadata.catch_all = Some((name, desc.trim().to_string()));
+        } else {
+            let mut description = desc.trim().to_string();
+            let default = if let Some(attrs_start) = description.find('[') {
+                if let Some(attrs_end) = description[attrs_start..].find(']') {
+                    let attrs = description[attrs_start + 1..attrs_start + attrs_end].trim();
+                    let mut default_value = None;
+
+                    // Parse attributes
+                    for attr in attrs.split(',') {
+                        let attr = attr.trim();
+                        if let Some((key, value)) = attr.split_once(':') {
+                            if key.trim() == "default" {
+                                default_value = Some(value.trim().to_string());
+                            }
+                        }
+                    }
+
+                    // Remove the attributes from description
+                    description = description[..attrs_start].trim().to_string();
+                    default_value
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            metadata.args.push(Arg {
+                name,
+                description,
+                default,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -180,10 +188,10 @@ mod tests {
 #@arg:output - Output file path [default:output.txt]
 #@arg:... - Additional arguments
 #@flag:verbose - Enable verbose output [required]
-#@bool:dry-run - Perform a dry run [default:false]
+#@flag:dry-run - Perform a dry run [default:false, bool]
 #@flag:output-dir - Directory for output files [required, default:./output]
 #@flag:extra - Extra flag [default:opt1, options:opt1|opt2]
-#@bool:debug - Enable debug mode
+#@flag:debug - Enable debug mode [bool]
 "#;
 
         let dir = tempdir().unwrap();
