@@ -107,6 +107,9 @@ pub fn find_script_file_in_dir(
         .ok()?
         .filter_map(Result::ok)
         .find_map(|entry| {
+            if entry.path().is_dir() {
+                return None;
+            }
             entry
                 .file_name()
                 .to_str()?
