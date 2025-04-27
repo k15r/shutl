@@ -1,37 +1,18 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::ArgMatches;
-use is_executable::IsExecutable;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
 /// Executes a script with the provided arguments
 pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Result<()> {
-    // Determine the interpreter based on file extension
-    let interpreter = match script_path.extension().and_then(|ext| ext.to_str()) {
-        Some("sh") => "bash",
-        Some("py") => "python3",
-        Some("rb") => "ruby",
-        Some("js") => "node",
-        _ => "bash", // Default to bash for files without extension
-    };
-
-    let mut command = ProcessCommand::new(interpreter);
-    command.arg(script_path);
-
-    // Check if the script is executable
-    // if it is executable use it directly
-    if script_path.is_executable() {
-        command = ProcessCommand::new(script_path);
-    }
-
-    // Build the command with the appropriate interpreter
+    let mut command = ProcessCommand::new(script_path);
 
     let metadata = parse_command_metadata(script_path);
 
     // Add positional arguments as environment variables
     for arg in metadata.args {
-        let env_name = format!("CLI_{}", arg.name.replace('-', "_").to_uppercase());
+        let env_name = format!("SHUTL_{}", arg.name.replace('-', "_").to_uppercase());
         let value = if let Some(value) = matches.get_one::<String>(&arg.name) {
             value.as_str()
         } else if let Some(ref default_value) = arg.default {
@@ -111,13 +92,8 @@ pub fn find_script_file_in_dir(
     let mut path = base_dir.to_path_buf();
 
     // Add all components except the last one as directories
-    for component in components.iter().take(components.len() - 1) {
-        path.push(component);
-    }
-
-    // Add the last component as a file
-    let last_component = components.last().unwrap();
-    path.push(last_component);
+    components.iter().take(components.len() - 1).for_each(|component| path.push(component));
+    path.push(components.last()?);
 
     // First try exact match
     if path.exists() {
@@ -150,6 +126,15 @@ mod tests {
         }
         let mut file = File::create(&script_path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
+        // Make the script executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = file.metadata().unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
         script_path
     }
 
@@ -195,7 +180,7 @@ mod tests {
             r#"#!/bin/bash
 #@description: Test shell script
 #@arg:input - Input file
-echo "Shell script executed with input: $CLI_INPUT"
+echo "Shell script executed with input: $SHUTL_INPUT"
 "#,
         );
 
