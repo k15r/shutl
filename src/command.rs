@@ -15,6 +15,15 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
     let metadata = parse_command_metadata(path);
     let mut cmd = Command::new(&name);
 
+    // Add the shutl-verbose flag
+    cmd = cmd.arg(
+        Arg::new("shutlverboseid")
+            .help("Enable verbose output")
+            .hide(true)
+            .long("shutl-verbose")
+            .action(clap::ArgAction::SetTrue),
+    );
+
     // Add description if available
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
@@ -239,7 +248,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 3); // input, verbose, no-verbose
+        assert_eq!(args.len(), 4); // input, verbose, no-verbose
 
         // Test input argument
         let input_arg = args.iter().find(|a| a.get_id() == "input").unwrap();

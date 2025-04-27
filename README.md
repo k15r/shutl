@@ -47,7 +47,7 @@ if [ "$SHUTL_DRY_RUN" = true ]; then
   echo "Dry run mode enabled"
 fi
 
-echo "Hostname: ${CLI_HOST}"
+echo "Hostname: ${SHUTL_HOST}"
 
 echo "Processing input file: $SHUTL_INPUT"
 echo "Output will be saved to: $SHUTL_OUTPUT"
