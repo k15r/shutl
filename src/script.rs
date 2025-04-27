@@ -30,11 +30,11 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
     let metadata = parse_command_metadata(script_path);
 
     // Add positional arguments as environment variables
-    for (arg_name, _, default) in metadata.args {
-        let env_name = format!("CLI_{}", arg_name.replace('-', "_").to_uppercase());
-        let value = if let Some(value) = matches.get_one::<String>(&arg_name) {
+    for arg in metadata.args {
+        let env_name = format!("CLI_{}", arg.name.replace('-', "_").to_uppercase());
+        let value = if let Some(value) = matches.get_one::<String>(&arg.name) {
             value.as_str()
-        } else if let Some(ref default_value) = default {
+        } else if let Some(ref default_value) = arg.default {
             default_value.as_str()
         } else {
             ""

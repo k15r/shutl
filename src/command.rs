@@ -11,18 +11,8 @@ pub struct CommandWithPath {
 }
 
 /// Builds a command for a script file
-fn build_script_command(path: &Path) -> CommandWithPath {
+fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let name = path.file_name().unwrap().to_string_lossy().to_string();
-    // Only strip .sh if it's the only extension
-    let name = if name.ends_with(".sh") && !name.ends_with(".sh.sh") {
-        name.trim_end_matches(".sh").to_string()
-    } else if name.ends_with(".sh.sh") {
-        // For .sh.sh files, keep the .sh extension
-        name.trim_end_matches(".sh.sh").to_string() + ".sh"
-    } else {
-        name
-    };
     let mut cmd = Command::new(&name);
 
     // Add description if available
@@ -31,10 +21,10 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 
     // Add arguments
-    for (name, description, default) in &metadata.args {
-        let mut arg = Arg::new(name).help(description);
+    for cmdarg in &metadata.args {
+        let mut arg = Arg::new(&cmdarg.name).help(&cmdarg.description);
 
-        if let Some(default_value) = default {
+        if let Some(default_value) = &cmdarg.default {
             arg = arg.default_value(default_value);
         } else {
             arg = arg.required(true);
@@ -91,12 +81,30 @@ fn build_script_command(path: &Path) -> CommandWithPath {
     }
 }
 
+fn trim_supported_extensions(name: &std::string::String) -> std::string::String {
+    let supported_extensions = ["sh", "py", "rb", "js"];
+    for ext in supported_extensions.iter() {
+        let extstr = format!(".{}", ext);
+        if name.ends_with(extstr.as_str()) {
+            // Check if the file has only one extension
+            return name
+                .strip_suffix(extstr.as_str())
+                .unwrap_or(name.as_str())
+                .to_string();
+        }
+    }
+    name.to_string()
+}
+
 /// Builds a list of commands from a directory
 pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
     let mut commands = Vec::new();
 
     // Read directory contents
     if let Ok(entries) = fs::read_dir(dir_path) {
+        // iterate over directory entries
+        let mut directories = Vec::new();
+        let mut files = Vec::new();
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
 
@@ -106,40 +114,63 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with('.'))
             {
-                // if path.file_name()
-                //     .and_then(|name| name.to_str())
-                //     .map_or(false, |name| name.starts_with('.')) {
                 continue;
             }
 
             if path.is_dir() {
-                // Create a command for the directory
-                let dir_name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let mut dir_cmd = Command::new(&dir_name);
+                directories.push(path);
+            } else if path.is_file() {
+                files.push(path);
+            }
+        }
 
-                // Get all subcommands from the directory
-                let subcommands = build_command_tree(&path);
+        // maintain a list of command names
+        let mut command_names = Vec::new();
+        for path in directories {
+            // Create a command for the directory
+            let dir_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
-                // Add all subcommands to the directory command
-                for subcmd in subcommands {
-                    dir_cmd = dir_cmd.subcommand(subcmd.command);
-                }
+            // add the directory name to the command names
+            command_names.push(dir_name.clone());
 
-                // Add the directory command to our list
-                commands.push(CommandWithPath {
-                    command: dir_cmd,
-                    file_path: path,
-                });
-            // } else if path.is_file() && (path.extension().map_or(false, |ext| ext == "sh") || path.extension().is_none()) {
-            } else if path.is_file()
-                && (path.extension().is_some_and(|ext| ext == "sh") || path.extension().is_none())
-            {
-                // Add command for script
-                commands.push(build_script_command(&path));
+            let mut dir_cmd = Command::new(&dir_name);
+
+            // Get all subcommands from the directory
+            let subcommands = build_command_tree(&path);
+
+            // Add all subcommands to the directory command
+            for subcmd in subcommands {
+                dir_cmd = dir_cmd.subcommand(subcmd.command);
+            }
+
+            // Add the directory command to our list
+            commands.push(CommandWithPath {
+                command: dir_cmd,
+                file_path: path,
+            });
+        }
+        for path in files {
+            // prepare the command name
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            // a list of all supported extensions
+            let clean_name = trim_supported_extensions(&name);
+            // check if the name is already in the list
+            if command_names.contains(&clean_name) {
+                // if the name is already in the list, skip it
+                command_names.push(name.clone());
+                commands.push(build_script_command(name, &path));
+            } else {
+                // if the name is not in the list, add it
+                command_names.push(clean_name.clone());
+                commands.push(build_script_command(clean_name, &path));
             }
         }
     }
@@ -192,7 +223,7 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let script_path = create_test_script(&dir.path(), "test.sh", script_content);
-        let cmd_with_path = build_script_command(&script_path);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
 
         // Test command name
         assert_eq!(cmd_with_path.command.get_name(), "test");
@@ -381,6 +412,48 @@ mod tests {
         assert!(content2.contains("#@description: test2"));
         let content3 = fs::read_to_string(&script3).unwrap();
         assert!(content3.contains("#@description: test3"));
+    }
+
+    #[test]
+    fn test_colliding_folder_and_script() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path().join(".shutl");
+        fs::create_dir(&scripts_dir).unwrap();
+        // Create a directory with the same name as a script
+        let subdir = scripts_dir.join("test");
+        fs::create_dir(&subdir).unwrap();
+        // Create a script with the same name as the directory
+        create_test_script(
+            &scripts_dir,
+            "test.sh",
+            "#!/bin/bash\n#@description: Test script",
+        );
+
+        // Create a script in the subdirectory to test collision
+        create_test_script(
+            &subdir,
+            "subdirtest.sh",
+            "#!/bin/bash\n#@description: Test script in subdirectory",
+        );
+
+        let commands = build_command_tree(&scripts_dir);
+
+        // Verify both commands exist with different names
+        assert_eq!(commands.len(), 2);
+
+        // First script should have name "test"
+        let cmd1 = commands
+            .iter()
+            .find(|c| c.command.get_name() == "test.sh")
+            .unwrap();
+        assert_eq!(cmd1.command.get_about().unwrap().to_string(), "Test script");
+
+        // Second script should have name "subdirtest"
+        let cmd2 = commands
+            .iter()
+            .find(|c| c.command.get_name() == "test")
+            .unwrap();
+        assert_eq!(cmd2.command.get_subcommands().count(), 1);
     }
 
     #[test]
