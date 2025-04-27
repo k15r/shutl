@@ -7,19 +7,19 @@
 #@bool:verbose - Enable verbose output
 
 # Process the main input/output
-echo "Processing $CLI_INPUT to $CLI_OUTPUT"
+echo "Processing $SHUTL_INPUT to $SHUTL_OUTPUT"
 
 # Process additional files if any
-if [ -n "$CLI_ADDITIONAL_ARGS" ]; then
-    echo "Additional files: $CLI_ADDITIONAL_ARGS"
+if [ -n "$SHUTL_ADDITIONAL_ARGS" ]; then
+    echo "Additional files: $SHUTL_ADDITIONAL_ARGS"
 fi
 
 # Use the format flag
-if [ -n "$CLI_FORMAT" ]; then
-    echo "Using format: $CLI_FORMAT"
+if [ -n "$SHUTL_FORMAT" ]; then
+    echo "Using format: $SHUTL_FORMAT"
 fi
 
-echo Verbose: $CLI_VERBOSE
+echo Verbose: $SHUTL_VERBOSE
 # Handle trailing arguments (after --)
 shift "$((OPTIND-1))"
 if [ $# -gt 0 ]; then
@@ -27,4 +27,4 @@ if [ $# -gt 0 ]; then
 fi
 
 
-echo $CLI_TRAILING_ARGS
+echo $SHUTL_TRAILING_ARGS

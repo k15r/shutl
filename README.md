@@ -43,18 +43,18 @@ Create shell scripts in the `~/.shutl` directory with metadata comments:
 #@arg:... - Additional arguments
 
 # Your script logic here
-if [ "$CLI_DRY_RUN" = true ]; then
+if [ "$SHUTL_DRY_RUN" = true ]; then
   echo "Dry run mode enabled"
 fi
 
-echo "Hostname: ${CLI_HOST}"
+echo "Hostname: ${SHUTL_HOST}"
 
-echo "Processing input file: $CLI_INPUT"
-echo "Output will be saved to: $CLI_OUTPUT"
+echo "Processing input file: $SHUTL_INPUT"
+echo "Output will be saved to: $SHUTL_OUTPUT"
 
 # Handle additional arguments
 if [ "$#" -gt 0 ]; then
-  echo "Additional arguments: $CLI_ADDITIONAL_ARGS"
+  echo "Additional arguments: $SHUTL_ADDITIONAL_ARGS"
 fi
 ```
 

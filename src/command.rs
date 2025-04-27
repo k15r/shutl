@@ -15,6 +15,15 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
     let metadata = parse_command_metadata(path);
     let mut cmd = Command::new(&name);
 
+    // Add the shutl-verbose flag
+    cmd = cmd.arg(
+        Arg::new("shutlverboseid")
+            .help("Enable verbose output")
+            .hide(true)
+            .long("shutl-verbose")
+            .action(clap::ArgAction::SetTrue),
+    );
+
     // Add description if available
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
@@ -102,37 +111,28 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 
     // Read directory contents
     if let Ok(entries) = fs::read_dir(dir_path) {
-        // iterate over directory entries
-        let mut directories = Vec::new();
-        let mut files = Vec::new();
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
+        // Partition entries into directories and files
+        let (mut directories, mut files): (Vec<_>, Vec<_>) = entries
+            .filter_map(Result::ok)
+            .partition(|entry| entry.path().is_dir());
 
-            // Skip hidden files and directories
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with('.'))
-            {
-                continue;
-            }
-
-            if path.is_dir() {
-                directories.push(path);
-            } else if path.is_file() {
-                files.push(path);
-            }
-        }
+        // Filter out hidden directories
+        directories.retain(|entry| {
+            let name = entry.file_name();
+            !name.to_string_lossy().starts_with('.')
+        });
+        // Filter out hidden files
+        files.retain(|entry| {
+            let name = entry.file_name();
+            !name.to_string_lossy().starts_with('.')
+        });
 
         // maintain a list of command names
         let mut command_names = Vec::new();
+
         for path in directories {
             // Create a command for the directory
-            let dir_name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+            let dir_name = path.file_name().to_string_lossy().to_string();
 
             // add the directory name to the command names
             command_names.push(dir_name.clone());
@@ -140,7 +140,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             let mut dir_cmd = Command::new(&dir_name);
 
             // Get all subcommands from the directory
-            let subcommands = build_command_tree(&path);
+            let subcommands = build_command_tree(&path.path());
 
             // Add all subcommands to the directory command
             for subcmd in subcommands {
@@ -150,27 +150,39 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             // Add the directory command to our list
             commands.push(CommandWithPath {
                 command: dir_cmd,
-                file_path: path,
+                file_path: path.path(),
             });
         }
-        for path in files {
-            // prepare the command name
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+        // check if we have multiple files which would cause a collision
+        let mut use_extension = false;
+        for path in files.iter() {
+            let name = path.file_name().to_string_lossy().to_string();
             // a list of all supported extensions
             let clean_name = trim_supported_extensions(&name);
             // check if the name is already in the list
             if command_names.contains(&clean_name) {
-                // if the name is already in the list, skip it
+                // if the name is already in the list, we need to use the extension
+                use_extension = true;
+                break;
+            }
+            command_names.push(clean_name.clone());
+        }
+
+        for path in files {
+            // prepare the command name
+            let name = path.file_name().to_string_lossy().to_string();
+            // a list of all supported extensions
+            if use_extension {
+                // if we have a collision, we need to use the extension
                 command_names.push(name.clone());
-                commands.push(build_script_command(name, &path));
+                commands.push(build_script_command(name, &path.path()));
             } else {
-                // if the name is not in the list, add it
-                command_names.push(clean_name.clone());
-                commands.push(build_script_command(clean_name, &path));
+                // if we don't have a collision, we can use the clean name
+                command_names.push(trim_supported_extensions(&name));
+                commands.push(build_script_command(
+                    trim_supported_extensions(&name),
+                    &path.path(),
+                ));
             }
         }
     }
@@ -218,7 +230,7 @@ mod tests {
         let script_content = r#"#!/bin/bash
 #@description: Test command
 #@arg:input - Input file
-#@bool:verbose - Enable verbose output
+#@flag:verbose - Enable verbose output [bool]
 "#;
 
         let dir = tempdir().unwrap();
@@ -236,7 +248,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 3); // input, verbose, no-verbose
+        assert_eq!(args.len(), 4); // input, verbose, no-verbose
 
         // Test input argument
         let input_arg = args.iter().find(|a| a.get_id() == "input").unwrap();

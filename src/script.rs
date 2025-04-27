@@ -1,37 +1,23 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::ArgMatches;
-use is_executable::IsExecutable;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
 /// Executes a script with the provided arguments
 pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Result<()> {
-    // Determine the interpreter based on file extension
-    let interpreter = match script_path.extension().and_then(|ext| ext.to_str()) {
-        Some("sh") => "bash",
-        Some("py") => "python3",
-        Some("rb") => "ruby",
-        Some("js") => "node",
-        _ => "bash", // Default to bash for files without extension
-    };
-
-    let mut command = ProcessCommand::new(interpreter);
-    command.arg(script_path);
-
-    // Check if the script is executable
-    // if it is executable use it directly
-    if script_path.is_executable() {
-        command = ProcessCommand::new(script_path);
-    }
-
-    // Build the command with the appropriate interpreter
+    let mut command = ProcessCommand::new(script_path);
 
     let metadata = parse_command_metadata(script_path);
 
+    // check if the `shutl-verbose` flag is set
+    let verbose = matches.get_flag("shutlverboseid");
+
+    // verbose mode logs the command being executed and all the environment variables that will be set for the command
+
     // Add positional arguments as environment variables
     for arg in metadata.args {
-        let env_name = format!("CLI_{}", arg.name.replace('-', "_").to_uppercase());
+        let env_name = format!("SHUTL_{}", arg.name.replace('-', "_").to_uppercase());
         let value = if let Some(value) = matches.get_one::<String>(&arg.name) {
             value.as_str()
         } else if let Some(ref default_value) = arg.default {
@@ -44,7 +30,7 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
 
     // Add flags as environment variables
     for flag in metadata.flags {
-        let env_name = format!("CLI_{}", flag.name.replace('-', "_").to_uppercase());
+        let env_name = format!("SHUTL_{}", flag.name.replace('-', "_").to_uppercase());
         let value = if flag.is_bool {
             // For boolean flags:
             // - If --no-flag is specified, set to false
@@ -85,7 +71,19 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
                 .map(|s| s.as_str())
                 .collect::<Vec<_>>()
                 .join(" ");
-            command.env("CLI_ADDITIONAL_ARGS", env_value);
+            command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+        }
+    }
+
+    // print the command being executed if verbose mode is enabled
+    if verbose {
+        println!("Environment variables:");
+        for (key, value) in command.get_envs() {
+            println!(
+                "{}: {}",
+                key.to_str().unwrap(),
+                value.unwrap().to_str().unwrap()
+            );
         }
     }
 
@@ -103,36 +101,38 @@ pub fn find_script_file(components: &[String]) -> Option<std::path::PathBuf> {
     find_script_file_in_dir(components, &get_scripts_dir())
 }
 
-/// Recursively finds a script file in the specified directory
 pub fn find_script_file_in_dir(
     components: &[String],
     base_dir: &Path,
 ) -> Option<std::path::PathBuf> {
     let mut path = base_dir.to_path_buf();
 
-    // Add all components except the last one as directories
-    for component in components.iter().take(components.len() - 1) {
+    // Build the path using all components except the last one
+    for component in &components[..components.len() - 1] {
         path.push(component);
     }
+    path.push(components.last()?);
 
-    // Add the last component as a file
-    let last_component = components.last().unwrap();
-    path.push(last_component);
-
-    // First try exact match
+    // Check for an exact match
     if path.exists() {
         return Some(path);
     }
 
-    // If not found, try with common script extensions
-    for ext in ["sh", "py", "rb", "js"] {
-        path.set_extension(ext);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
+    // Check for files starting with the last component in the parent directory
+    path.pop();
+    std::fs::read_dir(&path)
+        .ok()?
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            if entry.path().is_dir() {
+                return None;
+            }
+            entry
+                .file_name()
+                .to_str()?
+                .starts_with(components.last()?)
+                .then_some(entry.path())
+        })
 }
 
 #[cfg(test)]
@@ -150,6 +150,15 @@ mod tests {
         }
         let mut file = File::create(&script_path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
+        // Make the script executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = file.metadata().unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
         script_path
     }
 
@@ -195,7 +204,7 @@ mod tests {
             r#"#!/bin/bash
 #@description: Test shell script
 #@arg:input - Input file
-echo "Shell script executed with input: $CLI_INPUT"
+echo "Shell script executed with input: $SHUTL_INPUT"
 "#,
         );
 
@@ -206,7 +215,7 @@ echo "Shell script executed with input: $CLI_INPUT"
 import os
 #@description: Test Python script
 #@arg:input - Input file
-print(f"Python script executed with input: {os.environ.get('CLI_INPUT', '')}")
+print(f"Python script executed with input: {os.environ.get('SHUTL_INPUT', '')}")
 "#,
         );
 
@@ -216,14 +225,19 @@ print(f"Python script executed with input: {os.environ.get('CLI_INPUT', '')}")
             r#"#!/usr/bin/env ruby
 #@description: Test Ruby script
 #@arg:input - Input file
-puts "Ruby script executed with input: #{ENV['CLI_INPUT']}"
+puts "Ruby script executed with input: #{ENV['SHUTL_INPUT']}"
 "#,
         );
 
         // Create test matches
         let matches = clap::Command::new("test")
+            .arg(
+                clap::Arg::new("shutlverboseid")
+                    .long("shutl-verbose")
+                    .action(clap::ArgAction::SetTrue),
+            )
             .arg(clap::Arg::new("input").required(true))
-            .get_matches_from(vec!["test", "test.txt"]);
+            .get_matches_from(vec!["test", "test.txt", "--shutl-verbose"]);
 
         // Test shell script execution
         assert!(execute_script(&sh_script, &matches).is_ok());
