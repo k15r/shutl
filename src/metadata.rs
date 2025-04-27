@@ -198,12 +198,12 @@ mod tests {
 
         // Test arguments
         assert_eq!(metadata.args.len(), 2);
-        let input_arg= &metadata.args[0];
+        let input_arg = &metadata.args[0];
         assert_eq!(input_arg.name, "input");
         assert_eq!(input_arg.description, "Input file path");
         assert!(input_arg.default.is_none());
 
-        let output_arg= &metadata.args[1];
+        let output_arg = &metadata.args[1];
         assert_eq!(output_arg.name, "output");
         assert_eq!(output_arg.description, "Output file path");
         assert_eq!(output_arg.default.as_deref(), Some("output.txt"));
