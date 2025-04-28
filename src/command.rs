@@ -1,6 +1,7 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::{Arg, Command};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -154,7 +155,9 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             });
         }
         // check if we have multiple files which would cause a collision
-        let mut use_extension = false;
+        // this needs to be per clean name
+        let mut use_extension: HashMap<String, bool> = std::collections::HashMap::new();
+
         for path in files.iter() {
             let name = path.file_name().to_string_lossy().to_string();
             // a list of all supported extensions
@@ -162,7 +165,7 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             // check if the name is already in the list
             if command_names.contains(&clean_name) {
                 // if the name is already in the list, we need to use the extension
-                use_extension = true;
+                use_extension.insert(clean_name.clone(), true);
                 break;
             }
             command_names.push(clean_name.clone());
@@ -171,8 +174,9 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
         for path in files {
             // prepare the command name
             let name = path.file_name().to_string_lossy().to_string();
+            let clean_name = trim_supported_extensions(&name);
             // a list of all supported extensions
-            if use_extension {
+            if use_extension.contains_key(&clean_name) {
                 // if we have a collision, we need to use the extension
                 command_names.push(name.clone());
                 commands.push(build_script_command(name, &path.path()));
@@ -192,6 +196,8 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
 
 /// Builds the complete CLI command structure
 pub fn build_cli_command() -> Command {
+    // let args: Vec<String> = std::env::args().collect();
+
     let mut cli = Command::new("shutl")
         .about("A command-line tool for organizing, managing, and executing scripts as commands.")
         .hide(true); // Hide the help command

@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A command-line tool for organizing, managing, and executing scripts as commands. 
+A command-line tool for organizing, managing, and executing scripts as commands.
 Using command completion it provides a user-friendly interface for running shell scripts with metadata-driven arguments and flags.
 
 [![asciicast](https://asciinema.org/a/710656.svg)](https://asciinema.org/a/710656)
@@ -17,7 +17,6 @@ Using command completion it provides a user-friendly interface for running shell
 - **Directory-based Organization**: Organize commands in directories for better structure
 
 ## Installation
-
 
 ### From Source
 
@@ -49,7 +48,7 @@ Create shell scripts in the `~/.shutl` directory with metadata comments:
 #@arg:input - Input file path
 #@arg:output - Output file path [default:output.txt]
 #@flag:host - Host name [default:localhost]
-#@bool:dry-run - Perform a dry run [default:false]
+#@flag:dry-run - Perform a dry run [bool,default:false]
 #@arg:... - Additional arguments
 
 # Your script logic here
@@ -69,27 +68,32 @@ fi
 ```
 
 ### Command Completion
+
 To enable command completion, add the following to your shell configuration file (e.g., `.bashrc`, `.zshrc`):
 
 #### bash:
+
 ```bash
 . <(COMPLETE=bash shutl)
 ```
 
 #### zsh:
+
 ```bash
 . <(COMPLETE=zsh shutl)
 ``` 
 
 ### Metadata Syntax
 
-| **Metadata**  | **Syntax**                                                |
-|---------------|-----------------------------------------------------------|
-| Description   | `#@description: Your command description`                 |
-| Arguments     | `#@arg:name - Argument description`                       |
-| Catch-all     | `#@arg:... - Additional arguments description`            |
-| Flags         | `#@flag:name - Flag description [default:value,required]` |
-| Boolean       | `#@bool:name - Boolean flag description [default:value]`  |
+| **Metadata** | **Syntax**                                                                            |
+|--------------|---------------------------------------------------------------------------------------|
+| Description  | `#@description: Your command description`                                             |
+| Arguments    | `#@arg:name - Argument description`                                                   |
+| Catch-all    | `#@arg:... - Additional arguments description`                                        |
+| Flags        | `#@flag:name - Flag with default value [default:value]`                               |
+| Flags        | `#@flag:name - Boolean flag [bool]`                                                   |
+| Flags        | `#@flag:name - Flag with allowed values [options:allowed-value\|other-allowed-value]` |
+| Flags        | `#@flag:name - Required Flag [required]`                                              |
 
 ### Running Commands
 
