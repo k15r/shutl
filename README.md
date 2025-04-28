@@ -18,6 +18,9 @@ Using command completion it provides a user-friendly interface for running shell
 
 ## Installation
 
+
+### From Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/k15r/shutl.git
@@ -25,6 +28,13 @@ cd shutl
 
 # Build the project
 cargo build --release
+```
+
+### Using HomeBrew
+
+```bash
+brew tap k15r/shutl
+brew install shutl
 ```
 
 ## Usage
