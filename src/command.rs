@@ -200,7 +200,8 @@ pub fn build_cli_command() -> Command {
 
     let mut cli = Command::new("shutl")
         .about("A command-line tool for organizing, managing, and executing scripts as commands.")
-        .hide(true); // Hide the help command
+        .hide(true)
+        .disable_help_subcommand(true);
 
     for cmd_with_path in build_command_tree(&get_scripts_dir()) {
         cli = cli.subcommand(cmd_with_path.command);
