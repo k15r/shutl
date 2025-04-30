@@ -1,6 +1,7 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
 use clap::{Arg, Command};
+use is_executable::IsExecutable;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -14,7 +15,7 @@ pub struct CommandWithPath {
 /// Builds a command for a script file
 fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let mut cmd = Command::new(&name);
+    let mut cmd = Command::new(&name).disable_help_subcommand(true);
 
     // Add the shutl-verbose flag
     cmd = cmd.arg(
@@ -128,6 +129,12 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             !name.to_string_lossy().starts_with('.')
         });
 
+        // Filter out non-executable files
+        files.retain(|entry| {
+            let path = entry.path();
+            path.is_file() && path.is_executable()
+        });
+
         // maintain a list of command names
         let mut command_names = Vec::new();
 
@@ -138,7 +145,14 @@ pub fn build_command_tree(dir_path: &Path) -> Vec<CommandWithPath> {
             // add the directory name to the command names
             command_names.push(dir_name.clone());
 
-            let mut dir_cmd = Command::new(&dir_name);
+            let mut dir_cmd = Command::new(&dir_name).disable_help_subcommand(true);
+
+            // check if the directory contains a .shutl file
+            let config_path = path.path().join(".shutl");
+            if config_path.exists() {
+                // the file contains the description for the directory
+                dir_cmd = dir_cmd.about(fs::read_to_string(config_path).unwrap_or_default());
+            }
 
             // Get all subcommands from the directory
             let subcommands = build_command_tree(&path.path());
@@ -200,12 +214,13 @@ pub fn build_cli_command() -> Command {
 
     let mut cli = Command::new("shutl")
         .about("A command-line tool for organizing, managing, and executing scripts as commands.")
-        .hide(true); // Hide the help command
+        .disable_help_subcommand(true);
 
     for cmd_with_path in build_command_tree(&get_scripts_dir()) {
         cli = cli.subcommand(cmd_with_path.command);
     }
 
+    cli = cli.disable_help_subcommand(true);
     cli
 }
 
@@ -319,6 +334,41 @@ mod tests {
         let sub_cmd = subdir_subcmds[0];
         assert_eq!(sub_cmd.get_name(), "sub");
         assert_eq!(sub_cmd.get_about().unwrap().to_string(), "Sub script");
+    }
+
+    #[test]
+    fn test_build_command_tree_directory_description() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path().join(".shutl");
+        fs::create_dir(&scripts_dir).unwrap();
+
+        // Create a subdirectory
+        let subdir = scripts_dir.join("test_dir");
+        fs::create_dir(&subdir).unwrap();
+
+        // Create a directory with a .shutl file
+        let config_path = subdir.join(".shutl");
+        fs::write(&config_path, "This is a test directory").unwrap();
+
+        // Create a script in the directory
+        create_test_script(
+            &subdir,
+            "test.sh",
+            "#!/bin/bash\n#@description: Test script",
+        );
+
+        let commands = build_command_tree(&scripts_dir);
+
+        // Test directory command
+        assert_eq!(commands.len(), 1); // only the directory command
+        let dir_cmd = commands
+            .iter()
+            .find(|c| c.command.get_name() == "test_dir")
+            .unwrap();
+        assert_eq!(
+            dir_cmd.command.get_about().unwrap().to_string(),
+            "This is a test directory"
+        );
     }
 
     #[test]
