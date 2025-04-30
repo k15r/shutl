@@ -6,7 +6,6 @@ fn main() {
     clap_complete::CompleteEnv::with_factory(build_cli_command).complete();
     // Build the CLI command structure
     let mut cli = build_cli_command();
-    let mut cli_for_help = cli.clone();
 
     // Add the new command
     cli = cli.subcommand(
@@ -54,6 +53,8 @@ fn main() {
                     .short('e'),
             ),
     );
+
+    let mut cli_for_help = cli.clone();
 
     // Get matches for command processing
     let matches = cli.get_matches();
@@ -168,7 +169,8 @@ fn main() {
 
         if path.is_dir() {
             // Build a new command tree starting from this directory
-            let mut dir_cli = clap::Command::new(components.join(" "));
+            let mut dir_cli =
+                clap::Command::new(components.join(" ")).disable_help_subcommand(true);
             for cmd_with_path in shutl::command::build_command_tree(&path) {
                 dir_cli = dir_cli.subcommand(cmd_with_path.command);
             }
