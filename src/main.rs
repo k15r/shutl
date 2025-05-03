@@ -1,9 +1,19 @@
 use clap::ArgMatches;
+use std::string::String;
 use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir};
-use std::env;
+use std::{env, fs};
+use std::io::Write;
 use std::process::Command;
 
 fn main() {
+    env_logger::builder().init();
+
+    let args: Vec<String> = std::env::args().collect();
+
+    // write the args to a file all args on one line
+    log::debug!("args: {:?}", args);
+    let complete_index = std::env::var("_CLAP_COMPLETE_INDEX").unwrap_or_default();
+
     clap_complete::CompleteEnv::with_factory(build_cli_command).complete();
     // Build the CLI command structure
     let mut cli = build_cli_command();
@@ -55,7 +65,7 @@ fn execute_command(command: &str, sub_m: &ArgMatches) {
     if path.is_dir() {
         // Build a new command tree starting from this directory
         let mut dir_cli = clap::Command::new(components.join(" ")).disable_help_subcommand(true);
-        for cmd_with_path in shutl::command::build_command_tree(&path) {
+        for cmd_with_path in shutl::command::build_command_tree(&path, &components) {
             dir_cli = dir_cli.subcommand(cmd_with_path.command);
         }
         // Show help for this directory command
@@ -111,28 +121,27 @@ fn handle_new(new_matches: &ArgMatches) {
     let editor = new_matches.get_one::<String>("editor");
     let no_edit = new_matches.get_flag("no-edit");
 
-    // Create the script path
+    // Build the script path
     let mut script_path = get_scripts_dir();
     if !location.is_empty() {
         script_path.push(location);
     }
-    // Only append .sh if the name doesn't already end with it
-    let script_name = if name.ends_with(".sh") {
-        name.to_string()
+    let with_extension = &format!("{}.sh", name);
+    script_path.push(if name.ends_with(".sh") {
+        name
     } else {
-        format!("{}.sh", name)
-    };
-    script_path.push(&script_name);
+        with_extension
+    });
 
-    // Create parent directories if they don't exist
+    // Ensure parent directories exist
     if let Some(parent) = script_path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
 
-    // Create the script with basic template
+    // Write the script template
     let template = format!(
         "#!/bin/bash\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
-        name.trim_end_matches(".sh") // Use name without extension in description
+        name.trim_end_matches(".sh")
     );
     std::fs::write(&script_path, template).unwrap();
 
@@ -143,14 +152,14 @@ fn handle_new(new_matches: &ArgMatches) {
     )
     .unwrap();
 
-    // Open in editor if requested
+    // Open the script in an editor if required
     if !no_edit {
         let editor = editor
-            .map(|e| e.to_string())
+            .cloned()
             .or_else(|| env::var("EDITOR").ok())
             .unwrap_or_else(|| "vim".to_string());
 
-        Command::new(&editor)
+        Command::new(editor)
             .arg(&script_path)
             .status()
             .expect("Failed to open editor");
@@ -182,6 +191,16 @@ fn add_new_and_edit_cmd(cli: &mut clap::Command) -> clap::Command {
                     .help("Editor to use (defaults to $EDITOR or 'vim')")
                     .long("editor")
                     .short('e'),
+            )
+            .arg(
+                clap::Arg::new("type")
+                    .help("Type of script (e.g., bash, python)")
+                    .long("type")
+                    .short('t')
+                    .value_parser(clap::builder::PossibleValuesParser::new(vec![
+                        "zsh", "bash", "python", "ruby", "node",
+                    ]))
+                    .default_value("zsh"),
             )
             .arg(
                 clap::Arg::new("no-edit")
