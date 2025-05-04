@@ -1,9 +1,8 @@
 use clap::ArgMatches;
-use std::string::String;
 use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir};
-use std::{env, fs};
-use std::io::Write;
+use std::env;
 use std::process::Command;
+use std::string::String;
 
 fn main() {
     env_logger::builder().init();
@@ -12,7 +11,6 @@ fn main() {
 
     // write the args to a file all args on one line
     log::debug!("args: {:?}", args);
-    let complete_index = std::env::var("_CLAP_COMPLETE_INDEX").unwrap_or_default();
 
     clap_complete::CompleteEnv::with_factory(build_cli_command).complete();
     // Build the CLI command structure

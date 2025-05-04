@@ -297,17 +297,15 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
 
     // check if we have a script with the same name and a different extension
     if let Ok(entries) = fs::read_dir(dir_path) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-                    // strip the extension and compare with the name
-                    let clean_name = trim_supported_extensions(&file_name);
-                    if clean_name == name {
-                        // Check if the file is executable
-                        return (path.is_executable(), path);
-                    }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+                // strip the extension and compare with the name
+                let clean_name = trim_supported_extensions(&file_name);
+                if clean_name == name {
+                    // Check if the file is executable
+                    return (path.is_executable(), path);
                 }
             }
         }
@@ -330,8 +328,8 @@ pub fn build_cli_command() -> Command {
     log::debug!("build_cli_command: args: {:?}", args);
     let empty = "".to_string();
     // check if the second argument is '--' and the third is the binary name
-    let binary_name = std::env::args().nth(0).unwrap_or_default();
-    let binary_name = binary_name.split('/').last().unwrap_or_default();
+    let binary_name = std::env::args().next().unwrap_or_default();
+    let binary_name = binary_name.split('/').next_back().unwrap_or_default();
     let second_arg = args.get(1).unwrap_or(&empty);
     let third_arg = args.get(2).unwrap_or(&empty);
     let is_completion = complete && second_arg == "--" && third_arg == binary_name;
@@ -706,13 +704,6 @@ mod tests {
             .find(|c| c.command.get_name() == "test.sh")
             .unwrap();
         assert_eq!(cmd1.command.get_about().unwrap().to_string(), "Test script");
-
-        // Second script should have name "subdirtest"
-        let cmd2 = commands
-            .iter()
-            .find(|c| c.command.get_name() == "test")
-            .unwrap();
-        // assert_eq!(cmd2.command.get_subcommands().count(), 1);
     }
 
     #[test]
