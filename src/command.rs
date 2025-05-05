@@ -302,25 +302,20 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
 }
 
 fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
-    // check if we already have the correct name
     let script_path = dir_path.join(name);
-    if script_path.exists() && script_path.is_file() {
-        // Check if the file is executable
-        return (script_path.is_executable(), script_path);
+    if script_path.is_file() && script_path.is_executable() {
+        return (true, script_path);
     }
 
-    // check if we have a script with the same name and a different extension
     if let Ok(entries) = fs::read_dir(dir_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-                // strip the extension and compare with the name
-                let clean_name = trim_supported_extensions(&file_name);
-                if clean_name == name {
-                    // Check if the file is executable
-                    return (path.is_executable(), path);
-                }
+            if path.is_file()
+                && trim_supported_extensions(
+                    &path.file_name().unwrap().to_string_lossy().to_string(),
+                ) == name
+            {
+                return (path.is_executable(), path);
             }
         }
     }
@@ -334,8 +329,8 @@ pub fn build_cli_command() -> Command {
     let binary_with_path = std::env::args().next().unwrap_or_default();
     let binary_name = binary_with_path.rsplit('/').next().unwrap_or_default();
     let is_completion = std::env::var("_CLAP_COMPLETE_INDEX").is_ok()
-        && args.get(1).map_or(false, |arg| arg == "--")
-        && args.get(2).map_or(false, |arg| arg == binary_name);
+        && args.get(1).is_some_and(|arg| arg == "--")
+        && args.get(2).is_some_and(|arg| arg == binary_name);
 
     let active_args = if is_completion {
         args.into_iter().skip(2).collect::<Vec<_>>()
