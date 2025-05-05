@@ -331,43 +331,17 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
 /// Builds the complete CLI command structure
 pub fn build_cli_command() -> Command {
     let args = std::env::args().collect::<Vec<_>>();
+    let binary_with_path = std::env::args().next().unwrap_or_default();
+    let binary_name = binary_with_path.rsplit('/').next().unwrap_or_default();
+    let is_completion = std::env::var("_CLAP_COMPLETE_INDEX").is_ok()
+        && args.get(1).map_or(false, |arg| arg == "--")
+        && args.get(2).map_or(false, |arg| arg == binary_name);
 
-    // check if we are in completion mode:
-    // environment variable COMPLETE must be set
-    // AND
-    // the commandline looks like: <binary> -- <binary> <args>
-
-    // check if env variable COMPLETE is set
-    let complete = std::env::var("_CLAP_COMPLETE_INDEX").is_ok();
-    log::debug!("build_cli_command: args: {:?}", args);
-    let empty = "".to_string();
-    // check if the second argument is '--' and the third is the binary name
-    let binary_name = std::env::args().next().unwrap_or_default();
-    let binary_name = binary_name.split('/').next_back().unwrap_or_default();
-    let second_arg = args.get(1).unwrap_or(&empty);
-    let third_arg = args.get(2).unwrap_or(&empty);
-    let is_completion = complete && second_arg == "--" && third_arg == binary_name;
-    // list all environment variables
-    log::debug!(
-        "build_cli_command: complete: {}, second_arg: {}, third_arg: {}",
-        complete,
-        second_arg,
-        third_arg
-    );
-
-    // we only need to build the command tree for the current commandline.
-    // if we are in completion mode, we need to build it for the requested command (everything after '-- shutl')
-
-    let mut active_args;
-    if is_completion {
-        // remove the first three arguments from the args
-        active_args = args[2..].to_vec();
+    let active_args = if is_completion {
+        args.into_iter().skip(2).collect::<Vec<_>>()
     } else {
-        active_args = args;
-    }
-
-    // strip the first argument from the active args
-    active_args.remove(0);
+        args
+    };
 
     let mut cli = Command::new(crate_name!())
         .version(crate_version!())
@@ -379,7 +353,6 @@ pub fn build_cli_command() -> Command {
         cli = cli.subcommand(cmd_with_path.command);
     }
 
-    cli = cli.disable_help_subcommand(true);
     cli
 }
 
