@@ -185,13 +185,11 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
 }
 
 fn add_dir_subcommands(
-    dir_cmd: Command,
+    mut dir_cmd: Command,
     first_arg_path: &Path,
     active_args: &Vec<String>,
 ) -> Command {
-    let mut dir_cmd = dir_cmd.clone();
-    let subcommands = build_command_tree(first_arg_path, active_args);
-    for subcmd in subcommands {
+    for subcmd in build_command_tree(first_arg_path, active_args) {
         log::debug!(
             "build_command_tree: subcmd: {:?}",
             subcmd.command.get_name()
