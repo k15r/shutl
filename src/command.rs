@@ -220,84 +220,53 @@ fn dir_command(path: &Path, dir_name: &String) -> Command {
 fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
     let mut commands = Vec::new();
     log::debug!("commands_for_dir: {:?}", dir);
+
     if let Ok(entries) = fs::read_dir(dir) {
-        // Partition entries into directories and files
         let (mut directories, mut files): (Vec<_>, Vec<_>) = entries
             .filter_map(Result::ok)
             .partition(|entry| entry.path().is_dir());
 
-        // Filter out hidden directories
-        directories.retain(|entry| {
-            let name = entry.file_name();
-            !name.to_string_lossy().starts_with('.')
-        });
-        // Filter out hidden files
+        directories.retain(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
         files.retain(|entry| {
-            let name = entry.file_name();
-            !name.to_string_lossy().starts_with('.')
+            !entry.file_name().to_string_lossy().starts_with('.')
+                && entry.path().is_file()
+                && entry.path().is_executable()
         });
 
-        // Filter out non-executable files
-        files.retain(|entry| {
-            let path = entry.path();
-            path.is_file() && path.is_executable()
-        });
-
-        // maintain a list of command names
         let mut command_names = Vec::new();
+        let mut use_extension = HashMap::new();
 
-        for path in directories {
-            // Create a command for the directory
+        for path in &directories {
             let dir_name = path.file_name().to_string_lossy().to_string();
-
-            // add the directory name to the command names
             command_names.push(dir_name.clone());
-
-            let dir_cmd = dir_command(&path.path(), &dir_name);
-
-            log::debug!("commands_for_dir: creating command for {:?}", path);
-            // Add the directory command to our list
             commands.push(CommandWithPath {
-                command: dir_cmd,
+                command: dir_command(&path.path(), &dir_name),
                 file_path: path.path(),
             });
         }
-        // check if we have multiple files which would cause a collision
-        // this needs to be per clean name
-        let mut use_extension: HashMap<String, bool> = std::collections::HashMap::new();
 
-        for path in files.iter() {
+        for path in &files {
             let name = path.file_name().to_string_lossy().to_string();
-            // a list of all supported extensions
             let clean_name = trim_supported_extensions(&name);
-            // check if the name is already in the list
             if command_names.contains(&clean_name) {
-                // if the name is already in the list, we need to use the extension
                 use_extension.insert(clean_name.clone(), true);
-                break;
+            } else {
+                command_names.push(clean_name.clone());
             }
-            command_names.push(clean_name.clone());
         }
 
         for path in files {
-            // prepare the command name
             let name = path.file_name().to_string_lossy().to_string();
             let clean_name = trim_supported_extensions(&name);
-            // a list of all supported extensions
-            if use_extension.contains_key(&clean_name) {
-                // if we have a collision, we need to use the extension
-                command_names.push(name.clone());
-                commands.push(build_script_command(name, &path.path()));
+            let command_name = if use_extension.contains_key(&clean_name) {
+                name
             } else {
-                // if we don't have a collision, we can use the clean name
-                command_names.push(trim_supported_extensions(&name));
-                commands.push(build_script_command(
-                    trim_supported_extensions(&name),
-                    &path.path(),
-                ));
-            }
+                clean_name
+            };
+            commands.push(build_script_command(command_name, &path.path()));
         }
     }
+
     commands
 }
 
