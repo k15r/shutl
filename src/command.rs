@@ -161,15 +161,9 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
             .to_string();
 
         let mut dir_cmd = dir_command(&first_arg_path, &dir_name);
-        // Get all subcommands from the directory
-        let subcommands = build_command_tree(&first_arg_path, &active_args);
-        for subcmd in subcommands {
-            log::debug!(
-                "build_command_tree: subcmd: {:?}",
-                subcmd.command.get_name()
-            );
-            dir_cmd = dir_cmd.subcommand(subcmd.command);
-        }
+
+        dir_cmd = add_dir_subcommands(dir_cmd, &first_arg_path, &active_args);
+
         commands.push(CommandWithPath {
             command: dir_cmd,
             file_path: first_arg_path,
@@ -188,6 +182,23 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
 
     // if it is not a directory or a script, we need to build the command tree for the current directory
     build_command_tree(dir_path, &active_args)
+}
+
+fn add_dir_subcommands(
+    dir_cmd: Command,
+    first_arg_path: &Path,
+    active_args: &Vec<String>,
+) -> Command {
+    let mut dir_cmd = dir_cmd.clone();
+    let subcommands = build_command_tree(first_arg_path, active_args);
+    for subcmd in subcommands {
+        log::debug!(
+            "build_command_tree: subcmd: {:?}",
+            subcmd.command.get_name()
+        );
+        dir_cmd = dir_cmd.subcommand(subcmd.command);
+    }
+    dir_cmd
 }
 
 fn dir_command(path: &Path, dir_name: &String) -> Command {
