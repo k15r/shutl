@@ -204,16 +204,10 @@ fn add_dir_subcommands(
 fn dir_command(path: &Path, dir_name: &String) -> Command {
     let mut dir_cmd = Command::new(dir_name).disable_help_subcommand(true);
 
-    // check if the directory contains a .shutl file
-    let config_path = path.join(".shutl");
-    if config_path.exists() {
-        // the file contains the description for the directory
-        let about = fs::read_to_string(config_path)
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
-        dir_cmd = dir_cmd.about(about);
+    if let Ok(about) = fs::read_to_string(path.join(".shutl")) {
+        dir_cmd = dir_cmd.about(about.trim().to_owned());
     }
+
     dir_cmd
 }
 
