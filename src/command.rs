@@ -13,38 +13,32 @@ pub struct CommandWithPath {
 }
 
 /// Builds a command for a script file
-fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPath {
+fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let mut cmd = Command::new(&name).disable_help_subcommand(true);
+    let mut cmd = Command::new(&name)
+        .disable_help_subcommand(true)
+        .arg(
+            Arg::new("shutlverboseid")
+                .help("Enable verbose output")
+                .hide(true)
+                .long("shutl-verbose")
+                .action(clap::ArgAction::SetTrue),
+        );
 
-    // Add the shutl-verbose flag
-    cmd = cmd.arg(
-        Arg::new("shutlverboseid")
-            .help("Enable verbose output")
-            .hide(true)
-            .long("shutl-verbose")
-            .action(clap::ArgAction::SetTrue),
-    );
-
-    // Add description if available
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
     }
 
-    // Add arguments
     for cmdarg in &metadata.args {
         let mut arg = Arg::new(&cmdarg.name).help(&cmdarg.description);
-
-        if let Some(default_value) = &cmdarg.default {
-            arg = arg.default_value(default_value);
+        arg = if let Some(default_value) = &cmdarg.default {
+            arg.default_value(default_value)
         } else {
-            arg = arg.required(true);
-        }
-
+            arg.required(true)
+        };
         cmd = cmd.arg(arg);
     }
 
-    // Add catch-all argument if present
     if let Some((_, description)) = &metadata.catch_all {
         cmd = cmd.arg(
             Arg::new("additional-args")
@@ -54,7 +48,6 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
         );
     }
 
-    // Add flags
     for flag in &metadata.flags {
         let mut arg = Arg::new(&flag.name)
             .help(&flag.description)
@@ -62,12 +55,10 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
 
         if flag.is_bool {
             arg = arg.action(clap::ArgAction::SetTrue);
-            // Add negated version for boolean flags
-            let negated_name = format!("no-{}", flag.name);
             cmd = cmd.arg(
-                Arg::new(&negated_name)
+                Arg::new(format!("no-{}", flag.name))
                     .help(format!("Disable the '{}' flag", flag.name))
-                    .long(&negated_name)
+                    .long(format!("no-{}", flag.name))
                     .action(clap::ArgAction::SetTrue),
             );
         } else {
