@@ -1,6 +1,6 @@
 use crate::get_scripts_dir;
 use crate::metadata::parse_command_metadata;
-use clap::{Arg, Command};
+use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
 use is_executable::IsExecutable;
 use std::collections::HashMap;
 use std::fs;
@@ -164,8 +164,11 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         // check if the directory contains a .shutl file
         let config_path = first_arg_path.join(".shutl");
         if config_path.exists() {
-            // the file contains the description for the directory
-            dir_cmd = dir_cmd.about(fs::read_to_string(config_path).unwrap_or_default());
+            let about = fs::read_to_string(config_path)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            dir_cmd = dir_cmd.about(about);
         }
         // Get all subcommands from the directory
         let subcommands = build_command_tree(&first_arg_path, &active_args);
@@ -238,7 +241,11 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
             let config_path = path.path().join(".shutl");
             if config_path.exists() {
                 // the file contains the description for the directory
-                dir_cmd = dir_cmd.about(fs::read_to_string(config_path).unwrap_or_default());
+                let about = fs::read_to_string(config_path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned();
+                dir_cmd = dir_cmd.about(about);
             }
 
             log::debug!("commands_for_dir: creating command for {:?}", path);
@@ -355,8 +362,10 @@ pub fn build_cli_command() -> Command {
     // strip the first argument from the active args
     active_args.remove(0);
 
-    let mut cli = Command::new("shutl")
-        .about("A command-line tool for organizing, managing, and executing scripts as commands.")
+    let mut cli = Command::new(crate_name!())
+        .version(crate_version!())
+        .about(crate_description!())
+        .author(crate_authors!())
         .disable_help_subcommand(true);
 
     for cmd_with_path in build_command_tree(&get_scripts_dir(), &active_args) {
