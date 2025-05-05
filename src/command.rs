@@ -92,78 +92,42 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
     }
 }
 
-fn trim_supported_extensions(name: &std::string::String) -> std::string::String {
-    let supported_extensions = ["sh", "py", "rb", "js"];
-    for ext in supported_extensions.iter() {
-        let extstr = format!(".{}", ext);
-        if name.ends_with(extstr.as_str()) {
-            // Check if the file has only one extension
-            return name
-                .strip_suffix(extstr.as_str())
-                .unwrap_or(name.as_str())
-                .to_string();
-        }
-    }
-    name.to_string()
-}
-
 /// Builds a list of commands from a directory
 pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<CommandWithPath> {
-    // logic:
-    // commandline: <binary> -- <binary>
-    // arguments: dir_path: get_scripts_dir(), active_args: [""]
-    // expected: main command, subcommands for all directories in base directory and all scripts in the base directory
-
-    // commandline: <binary> -- <binary> <subfolder>
-    // arguments: dir_path: get_scripts_dir()/subfolder, active_args: [<subfolder>]
-    // expected: main command, subcommand for subfolder, subcommands for all directories in subfolder and all scripts in the subfolder
-
     log::debug!(
         "build_command_tree: dir_path {:?}, active_args: {:?}",
         dir_path,
         active_args
     );
     let mut commands = Vec::new();
-
-    // pop the first argument from the active args
-    // check if this is a directory or a script
     let mut active_args = active_args.clone();
-    let first_arg = if active_args.is_empty() {
-        "".to_string()
-    } else {
-        active_args.remove(0)
-    };
+    let first_arg = active_args.first().cloned().unwrap_or_default();
+    active_args = active_args.into_iter().skip(1).collect();
+
     log::debug!(
         "build_command_tree: First arg: {:?}, active_args(rest): {:?}",
         first_arg,
         active_args
     );
-    // check if the first argument is empty
+
     if first_arg.is_empty() {
-        // if it is empty, we need to use the current directory
         return commands_for_dir(dir_path);
     }
 
-    // check if the first argument is a directory
     let first_arg_path = dir_path.join(&first_arg);
-
     log::debug!("build_command_tree: First arg path: {:?}", first_arg_path);
-    let is_dir = first_arg_path.is_dir();
-    log::debug!("build_command_tree: Is dir: {:?}", is_dir);
 
-    // if it is a directory, we only need to build the command tree for this directory
-    if is_dir {
-        // create a command for the directory
+    if first_arg_path.is_dir() {
         let dir_name = first_arg_path
             .file_name()
             .unwrap()
             .to_string_lossy()
             .to_string();
-
-        let mut dir_cmd = dir_command(&first_arg_path, &dir_name);
-
-        dir_cmd = add_dir_subcommands(dir_cmd, &first_arg_path, &active_args);
-
+        let dir_cmd = add_dir_subcommands(
+            dir_command(&first_arg_path, &dir_name),
+            &first_arg_path,
+            &active_args,
+        );
         commands.push(CommandWithPath {
             command: dir_cmd,
             file_path: first_arg_path,
@@ -171,16 +135,12 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         return commands;
     }
 
-    // check if the first argument is a script. here we need to find that would if we strip their extensions match the first argument
     let (is_script, script_path) = is_script_file(dir_path, &first_arg);
     if is_script {
-        // build the command for the script
-        let cmd = build_script_command(first_arg, &script_path);
-        commands.push(cmd);
+        commands.push(build_script_command(first_arg, &script_path));
         return commands;
     }
 
-    // if it is not a directory or a script, we need to build the command tree for the current directory
     build_command_tree(dir_path, &active_args)
 }
 
@@ -239,7 +199,7 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
 
         for path in &files {
             let name = path.file_name().to_string_lossy().to_string();
-            let clean_name = trim_supported_extensions(&name);
+            let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
             if command_names.contains(&clean_name) {
                 use_extension.insert(clean_name.clone(), true);
             } else {
@@ -249,7 +209,7 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
 
         for path in files {
             let name = path.file_name().to_string_lossy().to_string();
-            let clean_name = trim_supported_extensions(&name);
+            let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
             let command_name = if use_extension.contains_key(&clean_name) {
                 name
             } else {
@@ -271,11 +231,8 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
     if let Ok(entries) = fs::read_dir(dir_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file()
-                && trim_supported_extensions(
-                    &path.file_name().unwrap().to_string_lossy().to_string(),
-                ) == name
-            {
+            let filename = path.file_name().unwrap().to_string_lossy().to_string();
+            if path.is_file() && filename.rsplitn(2, ".").last().unwrap_or(&filename) == name {
                 return (path.is_executable(), path);
             }
         }
