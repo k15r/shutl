@@ -159,17 +159,8 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let mut dir_cmd = Command::new(&dir_name).disable_help_subcommand(true);
 
-        // check if the directory contains a .shutl file
-        let config_path = first_arg_path.join(".shutl");
-        if config_path.exists() {
-            let about = fs::read_to_string(config_path)
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
-            dir_cmd = dir_cmd.about(about);
-        }
+        let mut dir_cmd = dir_command(&first_arg_path, &dir_name);
         // Get all subcommands from the directory
         let subcommands = build_command_tree(&first_arg_path, &active_args);
         for subcmd in subcommands {
@@ -197,6 +188,22 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
 
     // if it is not a directory or a script, we need to build the command tree for the current directory
     build_command_tree(dir_path, &active_args)
+}
+
+fn dir_command(path: &Path, dir_name: &String) -> Command {
+    let mut dir_cmd = Command::new(dir_name).disable_help_subcommand(true);
+
+    // check if the directory contains a .shutl file
+    let config_path = path.join(".shutl");
+    if config_path.exists() {
+        // the file contains the description for the directory
+        let about = fs::read_to_string(config_path)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        dir_cmd = dir_cmd.about(about);
+    }
+    dir_cmd
 }
 
 fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
@@ -235,18 +242,7 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
             // add the directory name to the command names
             command_names.push(dir_name.clone());
 
-            let mut dir_cmd = Command::new(&dir_name).disable_help_subcommand(true);
-
-            // check if the directory contains a .shutl file
-            let config_path = path.path().join(".shutl");
-            if config_path.exists() {
-                // the file contains the description for the directory
-                let about = fs::read_to_string(config_path)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned();
-                dir_cmd = dir_cmd.about(about);
-            }
+            let dir_cmd = dir_command(&path.path(), &dir_name);
 
             log::debug!("commands_for_dir: creating command for {:?}", path);
             // Add the directory command to our list
