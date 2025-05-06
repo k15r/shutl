@@ -13,12 +13,9 @@ pub struct CommandWithPath {
 }
 
 /// Builds a command for a script file
-fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPath {
+fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let mut cmd = Command::new(&name).disable_help_subcommand(true);
-
-    // Add the shutl-verbose flag
-    cmd = cmd.arg(
+    let mut cmd = Command::new(&name).disable_help_subcommand(true).arg(
         Arg::new("shutlverboseid")
             .help("Enable verbose output")
             .hide(true)
@@ -26,25 +23,20 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
             .action(clap::ArgAction::SetTrue),
     );
 
-    // Add description if available
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
     }
 
-    // Add arguments
     for cmdarg in &metadata.args {
         let mut arg = Arg::new(&cmdarg.name).help(&cmdarg.description);
-
-        if let Some(default_value) = &cmdarg.default {
-            arg = arg.default_value(default_value);
+        arg = if let Some(default_value) = &cmdarg.default {
+            arg.default_value(default_value)
         } else {
-            arg = arg.required(true);
-        }
-
+            arg.required(true)
+        };
         cmd = cmd.arg(arg);
     }
 
-    // Add catch-all argument if present
     if let Some((_, description)) = &metadata.catch_all {
         cmd = cmd.arg(
             Arg::new("additional-args")
@@ -54,7 +46,6 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
         );
     }
 
-    // Add flags
     for flag in &metadata.flags {
         let mut arg = Arg::new(&flag.name)
             .help(&flag.description)
@@ -62,12 +53,10 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
 
         if flag.is_bool {
             arg = arg.action(clap::ArgAction::SetTrue);
-            // Add negated version for boolean flags
-            let negated_name = format!("no-{}", flag.name);
             cmd = cmd.arg(
-                Arg::new(&negated_name)
+                Arg::new(format!("no-{}", flag.name))
                     .help(format!("Disable the '{}' flag", flag.name))
-                    .long(&negated_name)
+                    .long(format!("no-{}", flag.name))
                     .action(clap::ArgAction::SetTrue),
             );
         } else {
@@ -92,93 +81,42 @@ fn build_script_command(name: std::string::String, path: &Path) -> CommandWithPa
     }
 }
 
-fn trim_supported_extensions(name: &std::string::String) -> std::string::String {
-    let supported_extensions = ["sh", "py", "rb", "js"];
-    for ext in supported_extensions.iter() {
-        let extstr = format!(".{}", ext);
-        if name.ends_with(extstr.as_str()) {
-            // Check if the file has only one extension
-            return name
-                .strip_suffix(extstr.as_str())
-                .unwrap_or(name.as_str())
-                .to_string();
-        }
-    }
-    name.to_string()
-}
-
 /// Builds a list of commands from a directory
 pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<CommandWithPath> {
-    // logic:
-    // commandline: <binary> -- <binary>
-    // arguments: dir_path: get_scripts_dir(), active_args: [""]
-    // expected: main command, subcommands for all directories in base directory and all scripts in the base directory
-
-    // commandline: <binary> -- <binary> <subfolder>
-    // arguments: dir_path: get_scripts_dir()/subfolder, active_args: [<subfolder>]
-    // expected: main command, subcommand for subfolder, subcommands for all directories in subfolder and all scripts in the subfolder
-
     log::debug!(
         "build_command_tree: dir_path {:?}, active_args: {:?}",
         dir_path,
         active_args
     );
     let mut commands = Vec::new();
-
-    // pop the first argument from the active args
-    // check if this is a directory or a script
     let mut active_args = active_args.clone();
-    let first_arg = if active_args.is_empty() {
-        "".to_string()
-    } else {
-        active_args.remove(0)
-    };
+    let first_arg = active_args.first().cloned().unwrap_or_default();
+    active_args = active_args.into_iter().skip(1).collect();
+
     log::debug!(
         "build_command_tree: First arg: {:?}, active_args(rest): {:?}",
         first_arg,
         active_args
     );
-    // check if the first argument is empty
+
     if first_arg.is_empty() {
-        // if it is empty, we need to use the current directory
         return commands_for_dir(dir_path);
     }
 
-    // check if the first argument is a directory
     let first_arg_path = dir_path.join(&first_arg);
-
     log::debug!("build_command_tree: First arg path: {:?}", first_arg_path);
-    let is_dir = first_arg_path.is_dir();
-    log::debug!("build_command_tree: Is dir: {:?}", is_dir);
 
-    // if it is a directory, we only need to build the command tree for this directory
-    if is_dir {
-        // create a command for the directory
+    if first_arg_path.is_dir() {
         let dir_name = first_arg_path
             .file_name()
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let mut dir_cmd = Command::new(&dir_name).disable_help_subcommand(true);
-
-        // check if the directory contains a .shutl file
-        let config_path = first_arg_path.join(".shutl");
-        if config_path.exists() {
-            let about = fs::read_to_string(config_path)
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
-            dir_cmd = dir_cmd.about(about);
-        }
-        // Get all subcommands from the directory
-        let subcommands = build_command_tree(&first_arg_path, &active_args);
-        for subcmd in subcommands {
-            log::debug!(
-                "build_command_tree: subcmd: {:?}",
-                subcmd.command.get_name()
-            );
-            dir_cmd = dir_cmd.subcommand(subcmd.command);
-        }
+        let dir_cmd = add_dir_subcommands(
+            dir_command(&first_arg_path, &dir_name),
+            &first_arg_path,
+            &active_args,
+        );
         commands.push(CommandWithPath {
             command: dir_cmd,
             file_path: first_arg_path,
@@ -186,134 +124,105 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         return commands;
     }
 
-    // check if the first argument is a script. here we need to find that would if we strip their extensions match the first argument
     let (is_script, script_path) = is_script_file(dir_path, &first_arg);
     if is_script {
-        // build the command for the script
-        let cmd = build_script_command(first_arg, &script_path);
-        commands.push(cmd);
+        commands.push(build_script_command(first_arg, &script_path));
         return commands;
     }
 
-    // if it is not a directory or a script, we need to build the command tree for the current directory
     build_command_tree(dir_path, &active_args)
+}
+
+fn add_dir_subcommands(
+    mut dir_cmd: Command,
+    first_arg_path: &Path,
+    active_args: &Vec<String>,
+) -> Command {
+    for subcmd in build_command_tree(first_arg_path, active_args) {
+        log::debug!(
+            "build_command_tree: subcmd: {:?}",
+            subcmd.command.get_name()
+        );
+        dir_cmd = dir_cmd.subcommand(subcmd.command);
+    }
+    dir_cmd
+}
+
+fn dir_command(path: &Path, dir_name: &String) -> Command {
+    let mut dir_cmd = Command::new(dir_name).disable_help_subcommand(true);
+
+    if let Ok(about) = fs::read_to_string(path.join(".shutl")) {
+        dir_cmd = dir_cmd.about(about.trim().to_owned());
+    }
+
+    dir_cmd
 }
 
 fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
     let mut commands = Vec::new();
     log::debug!("commands_for_dir: {:?}", dir);
+
     if let Ok(entries) = fs::read_dir(dir) {
-        // Partition entries into directories and files
         let (mut directories, mut files): (Vec<_>, Vec<_>) = entries
             .filter_map(Result::ok)
             .partition(|entry| entry.path().is_dir());
 
-        // Filter out hidden directories
-        directories.retain(|entry| {
-            let name = entry.file_name();
-            !name.to_string_lossy().starts_with('.')
-        });
-        // Filter out hidden files
+        directories.retain(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
         files.retain(|entry| {
-            let name = entry.file_name();
-            !name.to_string_lossy().starts_with('.')
+            !entry.file_name().to_string_lossy().starts_with('.')
+                && entry.path().is_file()
+                && entry.path().is_executable()
         });
 
-        // Filter out non-executable files
-        files.retain(|entry| {
-            let path = entry.path();
-            path.is_file() && path.is_executable()
-        });
-
-        // maintain a list of command names
         let mut command_names = Vec::new();
+        let mut use_extension = HashMap::new();
 
-        for path in directories {
-            // Create a command for the directory
+        for path in &directories {
             let dir_name = path.file_name().to_string_lossy().to_string();
-
-            // add the directory name to the command names
             command_names.push(dir_name.clone());
-
-            let mut dir_cmd = Command::new(&dir_name).disable_help_subcommand(true);
-
-            // check if the directory contains a .shutl file
-            let config_path = path.path().join(".shutl");
-            if config_path.exists() {
-                // the file contains the description for the directory
-                let about = fs::read_to_string(config_path)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned();
-                dir_cmd = dir_cmd.about(about);
-            }
-
-            log::debug!("commands_for_dir: creating command for {:?}", path);
-            // Add the directory command to our list
             commands.push(CommandWithPath {
-                command: dir_cmd,
+                command: dir_command(&path.path(), &dir_name),
                 file_path: path.path(),
             });
         }
-        // check if we have multiple files which would cause a collision
-        // this needs to be per clean name
-        let mut use_extension: HashMap<String, bool> = std::collections::HashMap::new();
 
-        for path in files.iter() {
+        for path in &files {
             let name = path.file_name().to_string_lossy().to_string();
-            // a list of all supported extensions
-            let clean_name = trim_supported_extensions(&name);
-            // check if the name is already in the list
+            let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
             if command_names.contains(&clean_name) {
-                // if the name is already in the list, we need to use the extension
                 use_extension.insert(clean_name.clone(), true);
-                break;
+            } else {
+                command_names.push(clean_name.clone());
             }
-            command_names.push(clean_name.clone());
         }
 
         for path in files {
-            // prepare the command name
             let name = path.file_name().to_string_lossy().to_string();
-            let clean_name = trim_supported_extensions(&name);
-            // a list of all supported extensions
-            if use_extension.contains_key(&clean_name) {
-                // if we have a collision, we need to use the extension
-                command_names.push(name.clone());
-                commands.push(build_script_command(name, &path.path()));
+            let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+            let command_name = if use_extension.contains_key(&clean_name) {
+                name
             } else {
-                // if we don't have a collision, we can use the clean name
-                command_names.push(trim_supported_extensions(&name));
-                commands.push(build_script_command(
-                    trim_supported_extensions(&name),
-                    &path.path(),
-                ));
-            }
+                clean_name
+            };
+            commands.push(build_script_command(command_name, &path.path()));
         }
     }
+
     commands
 }
 
 fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
-    // check if we already have the correct name
     let script_path = dir_path.join(name);
-    if script_path.exists() && script_path.is_file() {
-        // Check if the file is executable
-        return (script_path.is_executable(), script_path);
+    if script_path.is_file() && script_path.is_executable() {
+        return (true, script_path);
     }
 
-    // check if we have a script with the same name and a different extension
     if let Ok(entries) = fs::read_dir(dir_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-                // strip the extension and compare with the name
-                let clean_name = trim_supported_extensions(&file_name);
-                if clean_name == name {
-                    // Check if the file is executable
-                    return (path.is_executable(), path);
-                }
+            let filename = path.file_name().unwrap().to_string_lossy().to_string();
+            if path.is_file() && filename.rsplitn(2, ".").last().unwrap_or(&filename) == name {
+                return (path.is_executable(), path);
             }
         }
     }
@@ -324,43 +233,17 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
 /// Builds the complete CLI command structure
 pub fn build_cli_command() -> Command {
     let args = std::env::args().collect::<Vec<_>>();
+    let binary_with_path = std::env::args().next().unwrap_or_default();
+    let binary_name = binary_with_path.rsplit('/').next().unwrap_or_default();
+    let is_completion = std::env::var("_CLAP_COMPLETE_INDEX").is_ok()
+        && args.get(1).is_some_and(|arg| arg == "--")
+        && args.get(2).is_some_and(|arg| arg == binary_name);
 
-    // check if we are in completion mode:
-    // environment variable COMPLETE must be set
-    // AND
-    // the commandline looks like: <binary> -- <binary> <args>
-
-    // check if env variable COMPLETE is set
-    let complete = std::env::var("_CLAP_COMPLETE_INDEX").is_ok();
-    log::debug!("build_cli_command: args: {:?}", args);
-    let empty = "".to_string();
-    // check if the second argument is '--' and the third is the binary name
-    let binary_name = std::env::args().next().unwrap_or_default();
-    let binary_name = binary_name.split('/').next_back().unwrap_or_default();
-    let second_arg = args.get(1).unwrap_or(&empty);
-    let third_arg = args.get(2).unwrap_or(&empty);
-    let is_completion = complete && second_arg == "--" && third_arg == binary_name;
-    // list all environment variables
-    log::debug!(
-        "build_cli_command: complete: {}, second_arg: {}, third_arg: {}",
-        complete,
-        second_arg,
-        third_arg
-    );
-
-    // we only need to build the command tree for the current commandline.
-    // if we are in completion mode, we need to build it for the requested command (everything after '-- shutl')
-
-    let mut active_args;
-    if is_completion {
-        // remove the first three arguments from the args
-        active_args = args[2..].to_vec();
+    let active_args = if is_completion {
+        args.into_iter().skip(2).collect::<Vec<_>>()
     } else {
-        active_args = args;
-    }
-
-    // strip the first argument from the active args
-    active_args.remove(0);
+        args
+    };
 
     let mut cli = Command::new(crate_name!())
         .version(crate_version!())
@@ -372,7 +255,6 @@ pub fn build_cli_command() -> Command {
         cli = cli.subcommand(cmd_with_path.command);
     }
 
-    cli = cli.disable_help_subcommand(true);
     cli
 }
 

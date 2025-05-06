@@ -86,8 +86,25 @@ fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
                             match key.trim() {
                                 "default" => flag.default = Some(value.trim().to_string()),
                                 "options" => {
-                                    flag.options =
-                                        value.split('|').map(|s| s.trim().to_string()).collect()
+                                    let options: Vec<String> =
+                                        value.split('|').map(|s| s.trim().to_string()).collect();
+                                    if let Some(default) = options
+                                        .iter()
+                                        .find(|s| s.starts_with('!') && s.ends_with('!'))
+                                    {
+                                        flag.default = Some(default.trim_matches('!').to_string());
+                                    }
+
+                                    flag.options = options
+                                        .into_iter()
+                                        .map(|s| {
+                                            if s.starts_with('!') && s.ends_with('!') {
+                                                s.trim_matches('!').to_string()
+                                            } else {
+                                                s
+                                            }
+                                        })
+                                        .collect();
                                 }
                                 _ => {}
                             }
