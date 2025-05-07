@@ -3,18 +3,18 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A command-line tool for organizing, managing, and executing scripts as commands.
-Using command completion it provides a user-friendly interface for running shell scripts with metadata-driven arguments and flags.
+Using command completion, it provides a user-friendly interface for running shell scripts with metadata-driven arguments and flags.
 
 [![asciicast](https://asciinema.org/a/710656.svg)](https://asciinema.org/a/710656)
 
 ## Features
 
 - **Dynamic Command Generation**: Automatically creates CLI commands from shell scripts
-- **Metadata Support**: Use special comments in your shell scripts to define command metadata
-- **Flexible Argument Handling**: Support for required and optional arguments with defaults
-- **Boolean Flags**: Automatic generation of boolean flags with negated versions
-- **Catch-all Arguments**: Support for additional arguments beyond defined parameters
-- **Directory-based Organization**: Organize commands in directories for better structure
+- **Metadata Support**: Supports special comments in your shell scripts to define command metadata
+- **Flexible Argument Handling**: Supports required and optional arguments with defaults
+- **Boolean Flags**: Automatically generates Boolean flags with negated versions
+- **Catch-all Arguments**: Supports additional arguments beyond defined parameters
+- **Directory-based Organization**: Organizes commands in directories for better structure
 
 ## Installation
 
@@ -69,7 +69,7 @@ fi
 
 ### Command Completion
 
-To enable command completion, add the following to your shell configuration file (e.g., `.bashrc`, `.zshrc`):
+To enable command completion, add the following to your shell configuration file (like `.bashrc` or `.zshrc`):
 
 #### bash:
 
@@ -100,14 +100,20 @@ To enable command completion, add the following to your shell configuration file
 
 ### Running Commands
 
+Basic usage:
+
 ```bash
-# Basic usage
 shutl example-command --input file.txt
+```
+Using flags:
 
-# With flags
+```bash
 shutl example-command --input file.txt --host example.com --dry-run
+```
 
-# Using negated flags
+Using negated flags:
+
+```bash
 shutl example-command --input file.txt --no-dry-run
 ```
 
@@ -127,7 +133,7 @@ shutl/
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a pull request.
 
 ## License
 
