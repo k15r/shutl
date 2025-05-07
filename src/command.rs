@@ -1,5 +1,5 @@
 use crate::get_scripts_dir;
-use crate::metadata::parse_command_metadata;
+use crate::metadata::{ArgType, parse_command_metadata};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
 use is_executable::IsExecutable;
 use std::collections::HashMap;
@@ -34,6 +34,23 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
         } else {
             arg.required(true)
         };
+
+        match &cmdarg.arg_type {
+            Some(ArgType::Dir) => {
+                arg = arg.value_hint(clap::ValueHint::DirPath);
+            }
+            Some(ArgType::File) => {
+                arg = arg.value_hint(clap::ValueHint::FilePath);
+            }
+            Some(ArgType::Executable) => {
+                arg = arg.value_hint(clap::ValueHint::ExecutablePath);
+            }
+            Some(ArgType::Path) => {
+                arg = arg.value_hint(clap::ValueHint::AnyPath);
+            }
+            _ => {}
+        }
+
         cmd = cmd.arg(arg);
     }
 
@@ -51,7 +68,7 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
             .help(&flag.description)
             .long(&flag.name);
 
-        if flag.is_bool {
+        if let Some(ArgType::Bool) = flag.arg_type {
             arg = arg.action(clap::ArgAction::SetTrue);
             cmd = cmd.arg(
                 Arg::new(format!("no-{}", flag.name))
@@ -70,6 +87,22 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
 
         if flag.required {
             arg = arg.required(true);
+        }
+
+        match &flag.arg_type {
+            Some(ArgType::Dir) => {
+                arg = arg.value_hint(clap::ValueHint::DirPath);
+            }
+            Some(ArgType::File) => {
+                arg = arg.value_hint(clap::ValueHint::FilePath);
+            }
+            Some(ArgType::Executable) => {
+                arg = arg.value_hint(clap::ValueHint::ExecutablePath);
+            }
+            Some(ArgType::Path) => {
+                arg = arg.value_hint(clap::ValueHint::AnyPath);
+            }
+            _ => {}
         }
 
         cmd = cmd.arg(arg);
