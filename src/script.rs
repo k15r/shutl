@@ -1,5 +1,5 @@
 use crate::get_scripts_dir;
-use crate::metadata::parse_command_metadata;
+use crate::metadata::{ArgType, parse_command_metadata};
 use clap::ArgMatches;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
@@ -31,7 +31,7 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
     // Add flags as environment variables
     for flag in metadata.flags {
         let env_name = format!("SHUTL_{}", flag.name.replace('-', "_").to_uppercase());
-        let value = if flag.is_bool {
+        let value = if Some(ArgType::Bool) == flag.arg_type {
             // For boolean flags:
             // - If --no-flag is specified, set to false
             // - If --flag is specified, set to true

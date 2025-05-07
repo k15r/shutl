@@ -10,17 +10,28 @@ pub struct CommandMetadata {
     pub catch_all: Option<(String, String)>, // (name, description) for catching remaining arguments
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ArgType {
+    Bool,
+    File,
+    Dir,
+    Path,
+    Executable,
+}
+
 pub struct Arg {
     pub name: String,
     pub description: String,
     pub default: Option<String>,
+    pub arg_type: Option<ArgType>,
+    pub options: Vec<String>,
 }
 
 pub struct Flag {
     pub name: String,
     pub description: String,
     pub required: bool,
-    pub is_bool: bool,
+    pub arg_type: Option<ArgType>,
     pub default: Option<String>,
     pub options: Vec<String>,
 }
@@ -69,7 +80,7 @@ fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
         name: name.trim().to_string(),
         description: description.to_string(),
         required: false,
-        is_bool: false,
+        arg_type: None,
         default: None,
         options: Vec::new(),
     };
@@ -79,8 +90,12 @@ fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
             let attrs = &description[attrs_start + 1..attrs_start + attrs_end];
             for attr in attrs.split(',') {
                 match attr.trim() {
-                    "bool" => flag.is_bool = true,
+                    "bool" => flag.arg_type = Some(ArgType::Bool),
                     "required" => flag.required = true,
+                    "file" => flag.arg_type = Some(ArgType::File),
+                    "dir" => flag.arg_type = Some(ArgType::Dir),
+                    "path" => flag.arg_type = Some(ArgType::Path),
+                    "executable" => flag.arg_type = Some(ArgType::Executable),
                     attr => {
                         if let Some((key, value)) = attr.split_once(':') {
                             match key.trim() {
@@ -131,15 +146,50 @@ fn parse_arg(metadata: &mut CommandMetadata, line: &str) {
             name: name.trim().to_string(),
             description: description.trim().to_string(),
             default: None,
+            arg_type: None,
+            options: Vec::new(),
         };
 
         if let Some(attrs_start) = description.find('[') {
             if let Some(attrs_end) = description[attrs_start..].find(']') {
                 let attrs = &description[attrs_start + 1..attrs_start + attrs_end];
                 for attr in attrs.split(',') {
-                    if let Some((key, value)) = attr.trim().split_once(':') {
-                        if key.trim() == "default" {
-                            arg.default = Some(value.trim().to_string());
+                    match attr.trim() {
+                        "file" => arg.arg_type = Some(ArgType::File),
+                        "dir" => arg.arg_type = Some(ArgType::Dir),
+                        "path" => arg.arg_type = Some(ArgType::Path),
+                        "executable" => arg.arg_type = Some(ArgType::Executable),
+                        attr => {
+                            if let Some((key, value)) = attr.split_once(':') {
+                                match key.trim() {
+                                    "default" => arg.default = Some(value.trim().to_string()),
+                                    "options" => {
+                                        let options: Vec<String> = value
+                                            .split('|')
+                                            .map(|s| s.trim().to_string())
+                                            .collect();
+                                        if let Some(default) = options
+                                            .iter()
+                                            .find(|s| s.starts_with('!') && s.ends_with('!'))
+                                        {
+                                            arg.default =
+                                                Some(default.trim_matches('!').to_string());
+                                        }
+
+                                        arg.options = options
+                                            .into_iter()
+                                            .map(|s| {
+                                                if s.starts_with('!') && s.ends_with('!') {
+                                                    s.trim_matches('!').to_string()
+                                                } else {
+                                                    s
+                                                }
+                                            })
+                                            .collect();
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
                     }
                 }
@@ -169,11 +219,11 @@ mod tests {
         let script_content = r#"#!/bin/bash
 #@description: Test script with various arguments and flags
 #@arg:input - Input file path
-#@arg:output - Output file path [default:output.txt]
+#@arg:output - Output file path [dir,default:output.txt]
 #@arg:... - Additional arguments
-#@flag:verbose - Enable verbose output [required]
+#@flag:verbose - Enable verbose output [bool]
 #@flag:dry-run - Perform a dry run [default:false, bool]
-#@flag:output-dir - Directory for output files [required, default:./output]
+#@flag:output-dir - Directory for output files [dir,required, default:./output]
 #@flag:extra - Extra flag [default:opt1, options:opt1|opt2]
 #@flag:debug - Enable debug mode [bool]
 "#;
@@ -213,8 +263,8 @@ mod tests {
         let verbose_flag = &metadata.flags[0];
         assert_eq!(verbose_flag.name, "verbose");
         assert_eq!(verbose_flag.description, "Enable verbose output");
-        assert!(verbose_flag.required);
-        assert!(!verbose_flag.is_bool);
+        assert!(verbose_flag.arg_type.is_some());
+        assert_eq!(verbose_flag.arg_type, Some(ArgType::Bool));
         assert!(verbose_flag.default.is_none());
 
         // Test dry-run flag
@@ -222,7 +272,7 @@ mod tests {
         assert_eq!(dry_run_flag.name, "dry-run");
         assert_eq!(dry_run_flag.description, "Perform a dry run");
         assert!(!dry_run_flag.required);
-        assert!(dry_run_flag.is_bool);
+        assert_eq!(dry_run_flag.arg_type, Some(ArgType::Bool));
         assert_eq!(dry_run_flag.default.as_deref(), Some("false"));
 
         // Test output-dir flag
@@ -230,7 +280,8 @@ mod tests {
         assert_eq!(output_dir_flag.name, "output-dir");
         assert_eq!(output_dir_flag.description, "Directory for output files");
         assert!(output_dir_flag.required);
-        assert!(!output_dir_flag.is_bool);
+        assert!(output_dir_flag.arg_type.is_some());
+        assert_eq!(output_dir_flag.arg_type, Some(ArgType::Dir));
         assert_eq!(output_dir_flag.default.as_deref(), Some("./output"));
 
         // Test extra flag
@@ -238,7 +289,7 @@ mod tests {
         assert_eq!(extra_flag.name, "extra");
         assert_eq!(extra_flag.description, "Extra flag");
         assert!(!extra_flag.required);
-        assert!(!extra_flag.is_bool);
+        assert!(extra_flag.arg_type.is_none());
         assert_eq!(extra_flag.default.as_deref(), Some("opt1"));
         assert_eq!(
             &extra_flag.options,
@@ -249,7 +300,8 @@ mod tests {
         assert_eq!(debug_flag.name, "debug");
         assert_eq!(debug_flag.description, "Enable debug mode");
         assert!(!debug_flag.required);
-        assert!(debug_flag.is_bool);
+        assert!(debug_flag.arg_type.is_some());
+        assert_eq!(debug_flag.arg_type, Some(ArgType::Bool));
         assert!(debug_flag.default.is_none());
         assert!(debug_flag.options.is_empty());
     }
