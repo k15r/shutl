@@ -94,6 +94,9 @@ To enable command completion, add the following to your shell configuration file
 | Flags        | `#@flag:name - Boolean flag [bool]`                                                   |
 | Flags        | `#@flag:name - Flag with allowed values [options:allowed-value\|other-allowed-value]` |
 | Flags        | `#@flag:name - Required Flag [required]`                                              |
+| Flags        | `#@flag:name - Flag with file as value [file]`                                        |
+| Flags        | `#@flag:name - Flag with directory as value [dir]`                                    |
+| Flags        | `#@flag:name - Flag with anypath as value [path]`                                     |
 
 ### Running Commands
 
