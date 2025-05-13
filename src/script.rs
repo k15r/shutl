@@ -1,5 +1,5 @@
 use crate::get_scripts_dir;
-use crate::metadata::{ArgType, parse_command_metadata};
+use crate::metadata::{ArgType, LineType, parse_command_metadata};
 use clap::ArgMatches;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
@@ -10,72 +10,69 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
 
     let metadata = parse_command_metadata(script_path);
 
-    // check if the `shutl-verbose` flag is set
-    let verbose = matches.get_flag("shutlverboseid");
-
-    // verbose mode logs the command being executed and all the environment variables that will be set for the command
-
     // Add positional arguments as environment variables
-    for arg in metadata.args {
-        let env_name = format!("SHUTL_{}", arg.name.replace('-', "_").to_uppercase());
-        let value = if let Some(value) = matches.get_one::<String>(&arg.name) {
-            value.as_str()
-        } else if let Some(ref default_value) = arg.default {
-            default_value.as_str()
-        } else {
-            ""
-        };
-        command.env(&env_name, value);
-    }
+    for arg in metadata.arguments {
+        match arg {
+            LineType::Positional(name, _, config) => {
+                if config.arg_type == Some(ArgType::CatchAll) {
+                    if let Some(values) = matches.get_many::<String>("additional-args") {
+                        let values_vec: Vec<_> = values.collect();
+                        let env_value = values_vec
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+                    }
+                }
+                let default_value = config.default.unwrap_or("".to_string());
+                let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());
 
-    // Add flags as environment variables
-    for flag in metadata.flags {
-        let env_name = format!("SHUTL_{}", flag.name.replace('-', "_").to_uppercase());
-        let value = if Some(ArgType::Bool) == flag.arg_type {
-            // For boolean flags:
-            // - If --no-flag is specified, set to false
-            // - If --flag is specified, set to true
-            // - If neither is specified, use default value
-            let negated_name = format!("no-{}", flag.name);
-            if matches.get_flag(&negated_name) {
-                "false"
-            } else if matches.get_flag(&flag.name) {
-                "true"
-            } else if let Some(ref default_value) = flag.default {
-                default_value.as_str()
-            } else {
-                "false"
+                let value = if let Some(value) = matches.get_one::<String>(name.as_str()) {
+                    value.as_str()
+                } else {
+                    default_value.as_str()
+                };
+                command.env(&env_name, value);
             }
-        } else {
-            // For non-boolean flags, use the provided value or default
-            if matches.contains_id(&flag.name) {
-                matches
-                    .get_one::<String>(&flag.name)
-                    .map(|s| s.as_str())
-                    .unwrap_or("")
-            } else if let Some(ref default_value) = flag.default {
-                default_value.as_str()
-            } else {
-                ""
+            LineType::Flag(name, _, config) => {
+                let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());
+                let default_value;
+                // If the flag is a boolean, check if it was set
+                let value = if Some(ArgType::Bool) == config.arg_type {
+                    // For boolean flags:
+                    // - If --no-flag is specified, set to false
+                    // - If --flag is specified, set to true
+                    // - If neither is specified, use default value
+                    default_value = config.default.unwrap_or("false".to_string());
+                    let negated_name = format!("no-{}", name);
+                    if matches.get_flag(&negated_name) {
+                        "false"
+                    } else if matches.get_flag(name.as_str()) {
+                        "true"
+                    } else {
+                        default_value.as_str()
+                    }
+                } else {
+                    // For non-boolean flags, use the provided value or default
+                    default_value = config.default.unwrap_or("".to_string());
+                    if matches.contains_id(name.as_str()) {
+                        matches
+                            .get_one::<String>(name.as_str())
+                            .map(|s| s.as_str())
+                            .unwrap_or("")
+                    } else {
+                        default_value.as_str()
+                    }
+                };
+                command.env(&env_name, value);
             }
-        };
-        command.env(&env_name, value);
-    }
-
-    // Add catch-all arguments as environment variable
-    if let Some((_, _)) = metadata.catch_all {
-        if let Some(values) = matches.get_many::<String>("additional-args") {
-            let values_vec: Vec<_> = values.collect();
-            let env_value = values_vec
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+            _ => {}
         }
     }
 
     // print the command being executed if verbose mode is enabled
+    let verbose = matches.get_flag("shutlverboseid");
     if verbose {
         println!("Environment variables:");
         for (key, value) in command.get_envs() {

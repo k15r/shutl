@@ -1,39 +1,42 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Metadata for a command parsed from its shell script
 #[derive(Default)]
 pub struct CommandMetadata {
     pub description: String,
-    pub args: Vec<Arg>,                      // (name, description, default)
-    pub flags: Vec<Flag>, // (name, description, required, is_bool, default, options)
-    pub catch_all: Option<(String, String)>, // (name, description) for catching remaining arguments
+    pub arguments: Vec<LineType>, // (name, description, required, default, options)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum LineType {
+    Description(String),
+    Flag(String, String, Config),
+    Positional(String, String, Config),
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum ArgType {
+    CatchAll,
     Bool,
     File,
     Dir,
     Path,
-    Executable,
 }
 
-pub struct Arg {
-    pub name: String,
-    pub description: String,
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompleteOptions {
+    pub path: PathBuf,
+    pub extensions: Vec<String>,
+}
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct Config {
     pub default: Option<String>,
     pub arg_type: Option<ArgType>,
     pub options: Vec<String>,
-}
-
-pub struct Flag {
-    pub name: String,
-    pub description: String,
+    pub complete_options: Option<CompleteOptions>,
     pub required: bool,
-    pub arg_type: Option<ArgType>,
-    pub default: Option<String>,
-    pub options: Vec<String>,
 }
 
 pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
@@ -53,16 +56,14 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
 
         while i < lines.len() && lines[i].starts_with(comment_prefix) {
             let line = lines[i].trim_start_matches(comment_prefix).trim();
-            if line.starts_with("description:") {
-                metadata.description = line
-                    .strip_prefix("description:")
-                    .unwrap()
-                    .trim()
-                    .to_string();
-            } else if line.starts_with("arg:") {
-                parse_arg(&mut metadata, line);
-            } else if line.starts_with("flag:") {
-                parse_flag(&mut metadata, line);
+            let parsed_line = parse_line(line);
+            if let Some(parsed) = parsed_line {
+                match parsed {
+                    LineType::Description(desc) => metadata.description = desc,
+                    _ => {
+                        metadata.arguments.push(parsed);
+                    }
+                }
             }
             i += 1;
         }
@@ -71,132 +72,133 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     metadata
 }
 
-fn parse_flag(metadata: &mut CommandMetadata, line: &str) {
-    let (name, description) = line["flag:".len()..]
-        .trim()
-        .split_once(" - ")
-        .unwrap_or_default();
-    let mut flag = Flag {
-        name: name.trim().to_string(),
-        description: description.to_string(),
-        required: false,
-        arg_type: None,
-        default: None,
-        options: Vec::new(),
-    };
+fn parse_line(line: &str) -> Option<LineType> {
+    if let Some(description) = line.strip_prefix("description:") {
+        return Some(LineType::Description(description.trim().to_string()));
+    }
 
-    if let Some(attrs_start) = description.find('[') {
-        if let Some(attrs_end) = description[attrs_start..].find(']') {
-            let attrs = &description[attrs_start + 1..attrs_start + attrs_end];
-            for attr in attrs.split(',') {
-                match attr.trim() {
-                    "bool" => flag.arg_type = Some(ArgType::Bool),
-                    "required" => flag.required = true,
-                    "file" => flag.arg_type = Some(ArgType::File),
-                    "dir" => flag.arg_type = Some(ArgType::Dir),
-                    "path" => flag.arg_type = Some(ArgType::Path),
-                    "executable" => flag.arg_type = Some(ArgType::Executable),
-                    attr => {
-                        if let Some((key, value)) = attr.split_once(':') {
-                            match key.trim() {
-                                "default" => flag.default = Some(value.trim().to_string()),
-                                "options" => {
-                                    let options: Vec<String> =
-                                        value.split('|').map(|s| s.trim().to_string()).collect();
-                                    if let Some(default) = options
-                                        .iter()
-                                        .find(|s| s.starts_with('!') && s.ends_with('!'))
-                                    {
-                                        flag.default = Some(default.trim_matches('!').to_string());
-                                    }
-
-                                    flag.options = options
-                                        .into_iter()
-                                        .map(|s| {
-                                            if s.starts_with('!') && s.ends_with('!') {
-                                                s.trim_matches('!').to_string()
-                                            } else {
-                                                s
-                                            }
-                                        })
-                                        .collect();
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-            flag.description = description[..attrs_start].trim().to_string();
+    if let Some(flag) = line.strip_prefix("flag:") {
+        if let Some((clean_name, rest)) = flag.trim().split_once(" - ") {
+            let (name, description, config) = parse_argument(clean_name, rest);
+            return Some(LineType::Flag(name, description, config));
         }
     }
 
-    metadata.flags.push(flag);
+    if let Some(arg) = line.strip_prefix("arg:") {
+        if let Some((clean_name, rest)) = arg.trim().split_once(" - ") {
+            let (name, description, config) = parse_argument(clean_name, rest);
+            return Some(LineType::Positional(name, description, config));
+        }
+    }
+
+    None
 }
 
-fn parse_arg(metadata: &mut CommandMetadata, line: &str) {
-    let (name, description) = line["arg:".len()..]
-        .trim()
-        .split_once(" - ")
-        .unwrap_or_default();
+fn parse_argument(name: &str, rest: &str) -> (String, String, Config) {
+    // extract annotations from the description
+    // and remove them from the description
+    // e.g. "description [dir,default:output.txt]" -> "description"
     if name == "..." {
-        metadata.catch_all = Some((name.to_string(), description.trim().to_string()));
-    } else {
-        let mut arg = Arg {
-            name: name.trim().to_string(),
-            description: description.trim().to_string(),
-            default: None,
-            arg_type: None,
-            options: Vec::new(),
+        let cfg = Config {
+            arg_type: Some(ArgType::CatchAll),
+            ..Default::default()
         };
+        return (
+            "additional-arguments".to_string(),
+            rest.trim().to_string(),
+            cfg,
+        );
+    }
+    let (description, annotations) = extract_annotations(rest);
+    let clean_description = description.trim().to_string();
+    let config = parse_annotations(annotations);
 
-        if let Some(attrs_start) = description.find('[') {
-            if let Some(attrs_end) = description[attrs_start..].find(']') {
-                let attrs = &description[attrs_start + 1..attrs_start + attrs_end];
-                for attr in attrs.split(',') {
-                    match attr.trim() {
-                        "file" => arg.arg_type = Some(ArgType::File),
-                        "dir" => arg.arg_type = Some(ArgType::Dir),
-                        "path" => arg.arg_type = Some(ArgType::Path),
-                        "executable" => arg.arg_type = Some(ArgType::Executable),
-                        attr => {
-                            if let Some((key, value)) = attr.split_once(':') {
-                                match key.trim() {
-                                    "default" => arg.default = Some(value.trim().to_string()),
-                                    "options" => {
-                                        let options: Vec<String> = value
-                                            .split('|')
-                                            .map(|s| s.trim().to_string())
-                                            .collect();
-                                        if let Some(default) = options
-                                            .iter()
-                                            .find(|s| s.starts_with('!') && s.ends_with('!'))
-                                        {
-                                            arg.default =
-                                                Some(default.trim_matches('!').to_string());
-                                        }
+    (
+        name.to_string(),
+        clean_description,
+        config.unwrap_or_default(),
+    )
+}
 
-                                        arg.options = options
-                                            .into_iter()
-                                            .map(|s| {
-                                                if s.starts_with('!') && s.ends_with('!') {
-                                                    s.trim_matches('!').to_string()
-                                                } else {
-                                                    s
-                                                }
-                                            })
-                                            .collect();
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
+fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
+    if annotations.is_empty() {
+        return None;
+    }
+
+    let mut cfg = Config {
+        default: None,
+        arg_type: None,
+        options: Vec::new(),
+        complete_options: None,
+        required: false,
+    };
+
+    for annotation in annotations {
+        let (key, value) = split_once_or_all(annotation.trim(), ':');
+        match key.trim() {
+            "default" => cfg.default = Some(value.trim().to_string()),
+            "required" => cfg.required = true,
+            "bool" => cfg.arg_type = Some(ArgType::Bool),
+            "dir" | "file" | "path" => {
+                let arg_type = match key {
+                    "dir" => ArgType::Dir,
+                    "file" => ArgType::File,
+                    "path" => ArgType::Path,
+                    _ => unreachable!(),
+                };
+                cfg.arg_type = Some(arg_type);
+                if !value.trim().is_empty() {
+                    cfg.complete_options = Some(CompleteOptions {
+                        path: PathBuf::from(value.trim()),
+                        extensions: Vec::new(),
+                    });
                 }
-                arg.description = description[..attrs_start].trim().to_string();
             }
+            "options" => {
+                let options: Vec<String> = value.split('|').map(|s| s.trim().to_string()).collect();
+                if let Some(default) = options
+                    .iter()
+                    .find(|s| s.starts_with('!') && s.ends_with('!'))
+                {
+                    cfg.default = Some(default.trim_matches('!').to_string());
+                }
+
+                cfg.options = options
+                    .into_iter()
+                    .map(|s| {
+                        if s.starts_with('!') && s.ends_with('!') {
+                            s.trim_matches('!').to_string()
+                        } else {
+                            s
+                        }
+                    })
+                    .collect();
+            }
+            _ => {}
         }
-        metadata.args.push(arg);
+    }
+    Some(cfg)
+}
+
+fn extract_annotations(description: &str) -> (String, Vec<String>) {
+    let mut annotations: Vec<String> = Vec::new();
+    let mut desc = description.to_string();
+
+    if let Some(start) = description.find('[') {
+        if let Some(end) = description[start..].find(']') {
+            let a = description[start + 1..start+end].to_string();
+            annotations = a.split(',').map(|s| s.trim().to_string()).collect();
+            desc = description[..start].trim().to_string();
+        }
+    }
+
+    (desc, annotations)
+}
+
+fn split_once_or_all(s: &str, delim: char) -> (&str, &str) {
+    match s.split_once(delim) {
+        Some((left, right)) => (left, right),
+        None => (s, ""),
     }
 }
 
@@ -239,70 +241,91 @@ mod tests {
         );
 
         // Test arguments
-        assert_eq!(metadata.args.len(), 2);
-        let input_arg = &metadata.args[0];
-        assert_eq!(input_arg.name, "input");
-        assert_eq!(input_arg.description, "Input file path");
-        assert!(input_arg.default.is_none());
+        let input_arg = &metadata.arguments[0];
+        assert_eq!(input_arg, &LineType::Positional(
+            "input".to_string(),
+            "Input file path".to_string(),
+            Config::default()
+        ));
 
-        let output_arg = &metadata.args[1];
-        assert_eq!(output_arg.name, "output");
-        assert_eq!(output_arg.description, "Output file path");
-        assert_eq!(output_arg.default.as_deref(), Some("output.txt"));
+        let output_arg = &metadata.arguments[1];
+        assert_eq!(output_arg, &LineType::Positional(
+            "output".to_string(),
+            "Output file path".to_string(),
+            Config {
+                default: Some("output.txt".to_string()),
+                arg_type: Some(ArgType::Dir),
+                ..Default::default()
+            }
+        ));
 
         // Test catch-all argument
-        assert!(metadata.catch_all.is_some());
-        let (catch_all_name, catch_all_desc) = metadata.catch_all.unwrap();
-        assert_eq!(catch_all_name, "...");
-        assert_eq!(catch_all_desc, "Additional arguments");
-
-        // Test flags
-        assert_eq!(metadata.flags.len(), 5);
-
+        let catch_all_arg = &metadata.arguments[2];
+        assert_eq!(catch_all_arg, &LineType::Positional(
+            "additional-arguments".to_string(),
+            "Additional arguments".to_string(),
+            Config {
+                arg_type: Some(ArgType::CatchAll),
+                ..Default::default()
+            }
+        ));
+        
         // Test verbose flag
-        let verbose_flag = &metadata.flags[0];
-        assert_eq!(verbose_flag.name, "verbose");
-        assert_eq!(verbose_flag.description, "Enable verbose output");
-        assert!(verbose_flag.arg_type.is_some());
-        assert_eq!(verbose_flag.arg_type, Some(ArgType::Bool));
-        assert!(verbose_flag.default.is_none());
+        let verbose_flag = &metadata.arguments[3];
+        assert_eq!(verbose_flag, &LineType::Flag(
+            "verbose".to_string(),
+            "Enable verbose output".to_string(),
+            Config {
+                arg_type: Some(ArgType::Bool),
+                ..Default::default()
+            }
+        ));
 
         // Test dry-run flag
-        let dry_run_flag = &metadata.flags[1];
-        assert_eq!(dry_run_flag.name, "dry-run");
-        assert_eq!(dry_run_flag.description, "Perform a dry run");
-        assert!(!dry_run_flag.required);
-        assert_eq!(dry_run_flag.arg_type, Some(ArgType::Bool));
-        assert_eq!(dry_run_flag.default.as_deref(), Some("false"));
+        let dry_run_flag = &metadata.arguments[4];
+        assert_eq!(dry_run_flag, &LineType::Flag(
+            "dry-run".to_string(),
+            "Perform a dry run".to_string(),
+            Config {
+                default: Some("false".to_string()),
+                arg_type: Some(ArgType::Bool),
+                ..Default::default()
+            }
+        ));
 
         // Test output-dir flag
-        let output_dir_flag = &metadata.flags[2];
-        assert_eq!(output_dir_flag.name, "output-dir");
-        assert_eq!(output_dir_flag.description, "Directory for output files");
-        assert!(output_dir_flag.required);
-        assert!(output_dir_flag.arg_type.is_some());
-        assert_eq!(output_dir_flag.arg_type, Some(ArgType::Dir));
-        assert_eq!(output_dir_flag.default.as_deref(), Some("./output"));
+        let output_dir_flag = &metadata.arguments[5];
+        assert_eq!(output_dir_flag, &LineType::Flag(
+            "output-dir".to_string(),
+            "Directory for output files".to_string(),
+            Config {
+                default: Some("./output".to_string()),
+                arg_type: Some(ArgType::Dir),
+                required: true,
+                ..Default::default()
+            }
+        ));
 
         // Test extra flag
-        let extra_flag = &metadata.flags[3];
-        assert_eq!(extra_flag.name, "extra");
-        assert_eq!(extra_flag.description, "Extra flag");
-        assert!(!extra_flag.required);
-        assert!(extra_flag.arg_type.is_none());
-        assert_eq!(extra_flag.default.as_deref(), Some("opt1"));
-        assert_eq!(
-            &extra_flag.options,
-            &vec!["opt1".to_string(), "opt2".to_string()]
-        );
+        let extra_flag = &metadata.arguments[6];
+        assert_eq!(extra_flag, &LineType::Flag(
+            "extra".to_string(),
+            "Extra flag".to_string(),
+            Config {
+                default: Some("opt1".to_string()),
+                options: vec!["opt1".to_string(), "opt2".to_string()],
+                ..Default::default()
+            }
+        ));
 
-        let debug_flag = &metadata.flags[4];
-        assert_eq!(debug_flag.name, "debug");
-        assert_eq!(debug_flag.description, "Enable debug mode");
-        assert!(!debug_flag.required);
-        assert!(debug_flag.arg_type.is_some());
-        assert_eq!(debug_flag.arg_type, Some(ArgType::Bool));
-        assert!(debug_flag.default.is_none());
-        assert!(debug_flag.options.is_empty());
+        let debug_flag = &metadata.arguments[7];
+        assert_eq!(debug_flag, &LineType::Flag(
+            "debug".to_string(),
+            "Enable debug mode".to_string(),
+            Config {
+                arg_type: Some(ArgType::Bool),
+                ..Default::default()
+            }
+        ));
     }
 }

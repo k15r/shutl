@@ -1,6 +1,7 @@
 use crate::get_scripts_dir;
-use crate::metadata::{ArgType, parse_command_metadata};
+use crate::metadata::{ArgType, LineType, parse_command_metadata};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
+use clap_complete::{ArgValueCompleter, PathCompleter};
 use is_executable::IsExecutable;
 use std::collections::HashMap;
 use std::fs;
@@ -27,85 +28,103 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
         cmd = cmd.about(&metadata.description);
     }
 
-    for cmdarg in &metadata.args {
-        let mut arg = Arg::new(&cmdarg.name).help(&cmdarg.description);
-        arg = if let Some(default_value) = &cmdarg.default {
-            arg.default_value(default_value)
-        } else {
-            arg.required(true)
-        };
+    for cmdarg in &metadata.arguments {
+        // Check if the argument is a positional argument
+        match cmdarg {
+            LineType::Positional(name, description, cfg) => {
+                let mut arg = Arg::new(name).help(description);
+                arg = if let Some(default_value) = cfg.clone().default {
+                    arg.default_value(default_value)
+                } else {
+                    arg.required(true)
+                };
 
-        match &cmdarg.arg_type {
-            Some(ArgType::Dir) => {
-                arg = arg.value_hint(clap::ValueHint::DirPath);
+                match cfg.arg_type {
+                    Some(ArgType::CatchAll) => {
+                        arg = arg.num_args(1..).action(clap::ArgAction::Append);
+                        arg = arg.required(false);
+                    }
+                    Some(ArgType::Dir) => {
+                        let mut pc = PathCompleter::dir();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    Some(ArgType::File) => {
+                        let mut pc = PathCompleter::file();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    Some(ArgType::Path) => {
+                        let mut pc = PathCompleter::any();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    _ => {}
+                }
+
+                cmd = cmd.arg(arg);
             }
-            Some(ArgType::File) => {
-                arg = arg.value_hint(clap::ValueHint::FilePath);
+
+            LineType::Flag(name, description, cfg) => {
+                // Skip flags for now
+                let mut arg = Arg::new(name).help(description).long(name);
+
+                if let Some(ArgType::Bool) = cfg.arg_type {
+                    arg = arg.action(clap::ArgAction::SetTrue);
+                    cmd = cmd.arg(
+                        Arg::new(format!("no-{}", name))
+                            .help(format!("Disable the '{}' flag", name))
+                            .long(format!("no-{}", name))
+                            .action(clap::ArgAction::SetTrue),
+                    );
+                } else {
+                    if cfg.default.is_some() {
+                        arg = arg.default_value(cfg.default.clone().unwrap());
+                    }
+                    if !cfg.options.is_empty() {
+                        arg = arg
+                            .value_parser(clap::builder::PossibleValuesParser::new(&cfg.options));
+                    }
+                }
+
+                if cfg.required {
+                    arg = arg.required(true);
+                }
+
+                match &cfg.arg_type {
+                    Some(ArgType::Dir) => {
+                        let mut pc = PathCompleter::dir();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    Some(ArgType::File) => {
+                        let mut pc = PathCompleter::file();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    Some(ArgType::Path) => {
+                        let mut pc = PathCompleter::any();
+                        if cfg.complete_options.is_some() {
+                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                        }
+                        arg = arg.add(ArgValueCompleter::new(pc));
+                    }
+                    _ => {}
+                }
+                cmd = cmd.arg(arg);
             }
-            Some(ArgType::Executable) => {
-                arg = arg.value_hint(clap::ValueHint::ExecutablePath);
-            }
-            Some(ArgType::Path) => {
-                arg = arg.value_hint(clap::ValueHint::AnyPath);
-            }
-            _ => {}
+            _ => unreachable!(),
         }
-
-        cmd = cmd.arg(arg);
-    }
-
-    if let Some((_, description)) = &metadata.catch_all {
-        cmd = cmd.arg(
-            Arg::new("additional-args")
-                .help(description)
-                .num_args(1..)
-                .required(false),
-        );
-    }
-
-    for flag in &metadata.flags {
-        let mut arg = Arg::new(&flag.name)
-            .help(&flag.description)
-            .long(&flag.name);
-
-        if let Some(ArgType::Bool) = flag.arg_type {
-            arg = arg.action(clap::ArgAction::SetTrue);
-            cmd = cmd.arg(
-                Arg::new(format!("no-{}", flag.name))
-                    .help(format!("Disable the '{}' flag", flag.name))
-                    .long(format!("no-{}", flag.name))
-                    .action(clap::ArgAction::SetTrue),
-            );
-        } else {
-            if let Some(default_value) = &flag.default {
-                arg = arg.default_value(default_value);
-            }
-            if !flag.options.is_empty() {
-                arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&flag.options));
-            }
-        }
-
-        if flag.required {
-            arg = arg.required(true);
-        }
-
-        match &flag.arg_type {
-            Some(ArgType::Dir) => {
-                arg = arg.value_hint(clap::ValueHint::DirPath);
-            }
-            Some(ArgType::File) => {
-                arg = arg.value_hint(clap::ValueHint::FilePath);
-            }
-            Some(ArgType::Executable) => {
-                arg = arg.value_hint(clap::ValueHint::ExecutablePath);
-            }
-            Some(ArgType::Path) => {
-                arg = arg.value_hint(clap::ValueHint::AnyPath);
-            }
-            _ => {}
-        }
-
-        cmd = cmd.arg(arg);
     }
 
     CommandWithPath {
