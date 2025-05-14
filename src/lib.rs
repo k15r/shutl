@@ -14,6 +14,10 @@ const SCRIPTS_DIR_NAME: &str = ".shutl";
 
 /// Gets the path to the scripts directory
 pub fn get_scripts_dir() -> PathBuf {
+    // check if SHUTL_DIR is set
+    if let Ok(shutl_dir) = std::env::var("SHUTL_DIR") {
+        return PathBuf::from(shutl_dir);
+    }
     let mut path = home_dir().expect("Could not determine home directory");
     path.push(SCRIPTS_DIR_NAME);
 

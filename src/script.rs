@@ -1,82 +1,59 @@
 use crate::get_scripts_dir;
-use crate::metadata::{ArgType, parse_command_metadata};
+use crate::metadata::{ArgType, LineType, parse_command_metadata};
 use clap::ArgMatches;
+use log::debug;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
 /// Executes a script with the provided arguments
 pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Result<()> {
     let mut command = ProcessCommand::new(script_path);
-
     let metadata = parse_command_metadata(script_path);
 
-    // check if the `shutl-verbose` flag is set
-    let verbose = matches.get_flag("shutlverboseid");
-
-    // verbose mode logs the command being executed and all the environment variables that will be set for the command
-
-    // Add positional arguments as environment variables
-    for arg in metadata.args {
-        let env_name = format!("SHUTL_{}", arg.name.replace('-', "_").to_uppercase());
-        let value = if let Some(value) = matches.get_one::<String>(&arg.name) {
-            value.as_str()
-        } else if let Some(ref default_value) = arg.default {
-            default_value.as_str()
-        } else {
-            ""
-        };
-        command.env(&env_name, value);
-    }
-
-    // Add flags as environment variables
-    for flag in metadata.flags {
-        let env_name = format!("SHUTL_{}", flag.name.replace('-', "_").to_uppercase());
-        let value = if Some(ArgType::Bool) == flag.arg_type {
-            // For boolean flags:
-            // - If --no-flag is specified, set to false
-            // - If --flag is specified, set to true
-            // - If neither is specified, use default value
-            let negated_name = format!("no-{}", flag.name);
-            if matches.get_flag(&negated_name) {
-                "false"
-            } else if matches.get_flag(&flag.name) {
-                "true"
-            } else if let Some(ref default_value) = flag.default {
-                default_value.as_str()
-            } else {
-                "false"
+    for arg in metadata.arguments {
+        match arg {
+            LineType::Positional(name, _, config) => {
+                if let Some(ArgType::CatchAll) = config.arg_type {
+                    debug!("catch-all: {}", name);
+                    if let Some(values) = matches.get_many::<String>("additional-args") {
+                        debug!("additional-args: {:?}", values);
+                        let env_value = values.map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
+                        debug!("additional-args: {:?}", env_value);
+                        command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+                    }
+                } else {
+                    let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());
+                    let value = matches
+                        .get_one::<String>(name.as_str())
+                        .map(|v| v.as_str())
+                        .unwrap_or_else(|| config.default.as_deref().unwrap_or(""));
+                    command.env(&env_name, value);
+                }
             }
-        } else {
-            // For non-boolean flags, use the provided value or default
-            if matches.contains_id(&flag.name) {
-                matches
-                    .get_one::<String>(&flag.name)
-                    .map(|s| s.as_str())
-                    .unwrap_or("")
-            } else if let Some(ref default_value) = flag.default {
-                default_value.as_str()
-            } else {
-                ""
+            LineType::Flag(name, _, config) => {
+                let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());
+                let value = if config.arg_type == Some(ArgType::Bool) {
+                    let negated_name = format!("no-{}", name);
+                    if matches.get_flag(&negated_name) {
+                        "false"
+                    } else if matches.get_flag(name.as_str()) {
+                        "true"
+                    } else {
+                        config.default.as_deref().unwrap_or("false")
+                    }
+                } else {
+                    matches
+                        .get_one::<String>(name.as_str())
+                        .map(|v| v.as_str())
+                        .unwrap_or_else(|| config.default.as_deref().unwrap_or(""))
+                };
+                command.env(&env_name, value);
             }
-        };
-        command.env(&env_name, value);
-    }
-
-    // Add catch-all arguments as environment variable
-    if let Some((_, _)) = metadata.catch_all {
-        if let Some(values) = matches.get_many::<String>("additional-args") {
-            let values_vec: Vec<_> = values.collect();
-            let env_value = values_vec
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+            _ => {}
         }
     }
 
-    // print the command being executed if verbose mode is enabled
-    if verbose {
+    if matches.get_flag("shutlverboseid") {
         println!("Environment variables:");
         for (key, value) in command.get_envs() {
             println!(
@@ -87,7 +64,8 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
         }
     }
 
-    // Execute the command
+    // debug the command env
+    debug!("Command Envs: {:?}", command.get_envs());
     let status = command.status()?;
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
@@ -95,7 +73,6 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
 
     Ok(())
 }
-
 /// Recursively finds a script file in the scripts directory
 pub fn find_script_file(components: &[String]) -> Option<std::path::PathBuf> {
     find_script_file_in_dir(components, &get_scripts_dir())
