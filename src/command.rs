@@ -3,6 +3,7 @@ use crate::metadata::{ArgType, LineType, parse_command_metadata};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
 use clap_complete::{ArgValueCompleter, PathCompleter};
 use is_executable::IsExecutable;
+use shellexpand;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,21 +48,33 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                     Some(ArgType::Dir) => {
                         let mut pc = PathCompleter::dir();
                         if cfg.complete_options.is_some() {
-                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
+                            let dir =
+                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
+
+                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
                         }
                         arg = arg.add(ArgValueCompleter::new(pc));
                     }
                     Some(ArgType::File) => {
                         let mut pc = PathCompleter::file();
                         if cfg.complete_options.is_some() {
-                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
+                            let dir =
+                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
+
+                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
                         }
                         arg = arg.add(ArgValueCompleter::new(pc));
                     }
                     Some(ArgType::Path) => {
                         let mut pc = PathCompleter::any();
                         if cfg.complete_options.is_some() {
-                            pc = pc.current_dir(cfg.complete_options.clone().unwrap().path.clone());
+                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
+                            let dir =
+                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
+
+                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
                         }
                         arg = arg.add(ArgValueCompleter::new(pc));
                     }

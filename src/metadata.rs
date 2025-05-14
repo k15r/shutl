@@ -24,7 +24,7 @@ pub enum ArgType {
     Path,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompleteOptions {
     pub path: PathBuf,
     pub extensions: Vec<String>,
