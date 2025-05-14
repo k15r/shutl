@@ -131,7 +131,7 @@ jobs:
 
       - name: Update Cargo.toml
         run: |
-          sed -i '' "s/^version = \".*\"/version = \"${{ env.next_version }}\"/" Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${{ env.next_version }}\"/" Cargo.toml
           git add Cargo.toml
           git commit -m "Bump version to ${{ env.next_version }}"
 
