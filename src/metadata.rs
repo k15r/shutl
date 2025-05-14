@@ -103,11 +103,7 @@ fn parse_argument(name: &str, rest: &str) -> (String, String, Config) {
             arg_type: Some(ArgType::CatchAll),
             ..Default::default()
         };
-        return (
-            "additional-arguments".to_string(),
-            rest.trim().to_string(),
-            cfg,
-        );
+        return ("additional-args".to_string(), rest.trim().to_string(), cfg);
     }
     let (description, annotations) = extract_annotations(rest);
     let clean_description = description.trim().to_string();
@@ -270,7 +266,7 @@ mod tests {
         assert_eq!(
             catch_all_arg,
             &LineType::Positional(
-                "additional-arguments".to_string(),
+                "additional-args".to_string(),
                 "Additional arguments".to_string(),
                 Config {
                     arg_type: Some(ArgType::CatchAll),
