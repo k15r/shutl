@@ -62,6 +62,8 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
                 value.unwrap().to_str().unwrap()
             );
         }
+
+        println!("Command: {:?}", command.get_program());
     }
 
     // debug the command env
