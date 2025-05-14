@@ -186,7 +186,7 @@ fn extract_annotations(description: &str) -> (String, Vec<String>) {
 
     if let Some(start) = description.find('[') {
         if let Some(end) = description[start..].find(']') {
-            let a = description[start + 1..start+end].to_string();
+            let a = description[start + 1..start + end].to_string();
             annotations = a.split(',').map(|s| s.trim().to_string()).collect();
             desc = description[..start].trim().to_string();
         }
@@ -242,90 +242,114 @@ mod tests {
 
         // Test arguments
         let input_arg = &metadata.arguments[0];
-        assert_eq!(input_arg, &LineType::Positional(
-            "input".to_string(),
-            "Input file path".to_string(),
-            Config::default()
-        ));
+        assert_eq!(
+            input_arg,
+            &LineType::Positional(
+                "input".to_string(),
+                "Input file path".to_string(),
+                Config::default()
+            )
+        );
 
         let output_arg = &metadata.arguments[1];
-        assert_eq!(output_arg, &LineType::Positional(
-            "output".to_string(),
-            "Output file path".to_string(),
-            Config {
-                default: Some("output.txt".to_string()),
-                arg_type: Some(ArgType::Dir),
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            output_arg,
+            &LineType::Positional(
+                "output".to_string(),
+                "Output file path".to_string(),
+                Config {
+                    default: Some("output.txt".to_string()),
+                    arg_type: Some(ArgType::Dir),
+                    ..Default::default()
+                }
+            )
+        );
 
         // Test catch-all argument
         let catch_all_arg = &metadata.arguments[2];
-        assert_eq!(catch_all_arg, &LineType::Positional(
-            "additional-arguments".to_string(),
-            "Additional arguments".to_string(),
-            Config {
-                arg_type: Some(ArgType::CatchAll),
-                ..Default::default()
-            }
-        ));
-        
+        assert_eq!(
+            catch_all_arg,
+            &LineType::Positional(
+                "additional-arguments".to_string(),
+                "Additional arguments".to_string(),
+                Config {
+                    arg_type: Some(ArgType::CatchAll),
+                    ..Default::default()
+                }
+            )
+        );
+
         // Test verbose flag
         let verbose_flag = &metadata.arguments[3];
-        assert_eq!(verbose_flag, &LineType::Flag(
-            "verbose".to_string(),
-            "Enable verbose output".to_string(),
-            Config {
-                arg_type: Some(ArgType::Bool),
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            verbose_flag,
+            &LineType::Flag(
+                "verbose".to_string(),
+                "Enable verbose output".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Bool),
+                    ..Default::default()
+                }
+            )
+        );
 
         // Test dry-run flag
         let dry_run_flag = &metadata.arguments[4];
-        assert_eq!(dry_run_flag, &LineType::Flag(
-            "dry-run".to_string(),
-            "Perform a dry run".to_string(),
-            Config {
-                default: Some("false".to_string()),
-                arg_type: Some(ArgType::Bool),
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            dry_run_flag,
+            &LineType::Flag(
+                "dry-run".to_string(),
+                "Perform a dry run".to_string(),
+                Config {
+                    default: Some("false".to_string()),
+                    arg_type: Some(ArgType::Bool),
+                    ..Default::default()
+                }
+            )
+        );
 
         // Test output-dir flag
         let output_dir_flag = &metadata.arguments[5];
-        assert_eq!(output_dir_flag, &LineType::Flag(
-            "output-dir".to_string(),
-            "Directory for output files".to_string(),
-            Config {
-                default: Some("./output".to_string()),
-                arg_type: Some(ArgType::Dir),
-                required: true,
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            output_dir_flag,
+            &LineType::Flag(
+                "output-dir".to_string(),
+                "Directory for output files".to_string(),
+                Config {
+                    default: Some("./output".to_string()),
+                    arg_type: Some(ArgType::Dir),
+                    required: true,
+                    ..Default::default()
+                }
+            )
+        );
 
         // Test extra flag
         let extra_flag = &metadata.arguments[6];
-        assert_eq!(extra_flag, &LineType::Flag(
-            "extra".to_string(),
-            "Extra flag".to_string(),
-            Config {
-                default: Some("opt1".to_string()),
-                options: vec!["opt1".to_string(), "opt2".to_string()],
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            extra_flag,
+            &LineType::Flag(
+                "extra".to_string(),
+                "Extra flag".to_string(),
+                Config {
+                    default: Some("opt1".to_string()),
+                    options: vec!["opt1".to_string(), "opt2".to_string()],
+                    ..Default::default()
+                }
+            )
+        );
 
         let debug_flag = &metadata.arguments[7];
-        assert_eq!(debug_flag, &LineType::Flag(
-            "debug".to_string(),
-            "Enable debug mode".to_string(),
-            Config {
-                arg_type: Some(ArgType::Bool),
-                ..Default::default()
-            }
-        ));
+        assert_eq!(
+            debug_flag,
+            &LineType::Flag(
+                "debug".to_string(),
+                "Enable debug mode".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Bool),
+                    ..Default::default()
+                }
+            )
+        );
     }
 }
