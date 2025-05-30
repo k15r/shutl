@@ -38,6 +38,9 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                 } else {
                     arg.required(true)
                 };
+                if !cfg.options.is_empty() {
+                    arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&cfg.options))
+                }
 
                 match cfg.arg_type {
                     Some(ArgType::CatchAll) => {
@@ -361,6 +364,7 @@ mod tests {
         let script_content = r#"#!/bin/bash
 #@description: test script
 #@arg:pos - positional [required]
+#@arg:pos-options - positional with options [options:!one!|two|three]
 #@arg:pos-default - positional with default [default:default]
 #@arg:pos-dir - positional with dir [dir:~/]
 #@arg:pos-file - positional with file [file:~/]
@@ -394,7 +398,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 21);
+        assert_eq!(args.len(), 22);
 
         validate_arg(&args, "pos", "positional", true, None, None);
         validate_arg(
@@ -404,6 +408,18 @@ mod tests {
             false,
             Some("default".to_string()),
             None,
+        );
+        validate_arg(
+            &args,
+            "pos-options",
+            "positional with options",
+            false,
+            Some("one".to_string()),
+            Some(vec![
+                "one".to_string(),
+                "two".to_string(),
+                "three".to_string(),
+            ]),
         );
         validate_arg(&args, "pos-dir", "positional with dir", true, None, None);
         validate_arg(&args, "pos-file", "positional with file", true, None, None);
