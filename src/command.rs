@@ -17,12 +17,24 @@ pub struct CommandWithPath {
 /// Builds a command for a script file
 fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let mut cmd = Command::new(&name).disable_help_subcommand(true).arg(
-        Arg::new("shutlverboseid")
-            .help("Print verbose information about the command")
-            .long("shutl-verbose")
-            .action(clap::ArgAction::SetTrue),
-    );
+    let mut cmd = Command::new(&name)
+        .disable_help_subcommand(true)
+        .arg(
+            Arg::new("shutlverboseid")
+                .help("Print verbose information about the command")
+                .long("shutl-verbose")
+                .hide(true)
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("shutlnoexec")
+                .help(
+                    "Do not execute the script, just print the command. Implies `--shutl-verbose`",
+                )
+                .hide(true)
+                .long("shutl-noexec")
+                .action(clap::ArgAction::SetTrue),
+        );
 
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
@@ -38,6 +50,9 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                 } else {
                     arg.required(true)
                 };
+                if !cfg.options.is_empty() {
+                    arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&cfg.options))
+                }
 
                 match cfg.arg_type {
                     Some(ArgType::CatchAll) => {
@@ -361,6 +376,7 @@ mod tests {
         let script_content = r#"#!/bin/bash
 #@description: test script
 #@arg:pos - positional [required]
+#@arg:pos-options - positional with options [options:!one!|two|three]
 #@arg:pos-default - positional with default [default:default]
 #@arg:pos-dir - positional with dir [dir:~/]
 #@arg:pos-file - positional with file [file:~/]
@@ -394,7 +410,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 21);
+        assert_eq!(args.len(), 23);
 
         validate_arg(&args, "pos", "positional", true, None, None);
         validate_arg(
@@ -404,6 +420,18 @@ mod tests {
             false,
             Some("default".to_string()),
             None,
+        );
+        validate_arg(
+            &args,
+            "pos-options",
+            "positional with options",
+            false,
+            Some("one".to_string()),
+            Some(vec![
+                "one".to_string(),
+                "two".to_string(),
+                "three".to_string(),
+            ]),
         );
         validate_arg(&args, "pos-dir", "positional with dir", true, None, None);
         validate_arg(&args, "pos-file", "positional with file", true, None, None);
@@ -553,7 +581,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 4); // input, verbose, no-verbose
+        assert_eq!(args.len(), 5); // input, verbose, no-verbose
 
         // Test input argument
         let input_arg = args.iter().find(|a| a.get_id() == "input").unwrap();

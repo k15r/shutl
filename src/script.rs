@@ -53,7 +53,7 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
         }
     }
 
-    if matches.get_flag("shutlverboseid") {
+    if matches.get_flag("shutlverboseid") || matches.get_flag("shutlnoexec") {
         println!("Environment variables:");
         for (key, value) in command.get_envs() {
             println!(
@@ -68,6 +68,10 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
 
     // debug the command env
     debug!("Command Envs: {:?}", command.get_envs());
+    if matches.get_flag("shutlnoexec") {
+        //    println!("Command would be executed: {:?}", command);
+        return Ok(());
+    }
     let status = command.status()?;
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
@@ -213,6 +217,11 @@ puts "Ruby script executed with input: #{ENV['SHUTL_INPUT']}"
             .arg(
                 clap::Arg::new("shutlverboseid")
                     .long("shutl-verbose")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                clap::Arg::new("shutlnoexec")
+                    .long("shutl-noexec")
                     .action(clap::ArgAction::SetTrue),
             )
             .arg(clap::Arg::new("input").required(true))
