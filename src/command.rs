@@ -17,17 +17,24 @@ pub struct CommandWithPath {
 /// Builds a command for a script file
 fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
-    let mut cmd = Command::new(&name).disable_help_subcommand(true).arg(
-        Arg::new("shutlverboseid")
-            .help("Print verbose information about the command")
-            .long("shutl-verbose")
-            .action(clap::ArgAction::SetTrue),
-    ).arg(
-        Arg::new("shutlnoexec")
-            .help("Do not execute the script, just print the command. Implies `--shutl-verbose`")
-            .long("shutl-noexec")
-            .action(clap::ArgAction::SetTrue),
-    );
+    let mut cmd = Command::new(&name)
+        .disable_help_subcommand(true)
+        .arg(
+            Arg::new("shutlverboseid")
+                .help("Print verbose information about the command")
+                .long("shutl-verbose")
+                .hide(true)
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("shutlnoexec")
+                .help(
+                    "Do not execute the script, just print the command. Implies `--shutl-verbose`",
+                )
+                .hide(true)
+                .long("shutl-noexec")
+                .action(clap::ArgAction::SetTrue),
+        );
 
     if !metadata.description.is_empty() {
         cmd = cmd.about(&metadata.description);
