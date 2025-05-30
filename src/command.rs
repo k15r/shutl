@@ -22,6 +22,11 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
             .help("Print verbose information about the command")
             .long("shutl-verbose")
             .action(clap::ArgAction::SetTrue),
+    ).arg(
+        Arg::new("shutlnoexec")
+            .help("Do not execute the script, just print the command. Implies `--shutl-verbose`")
+            .long("shutl-noexec")
+            .action(clap::ArgAction::SetTrue),
     );
 
     if !metadata.description.is_empty() {
@@ -398,7 +403,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 22);
+        assert_eq!(args.len(), 23);
 
         validate_arg(&args, "pos", "positional", true, None, None);
         validate_arg(
@@ -569,7 +574,7 @@ mod tests {
 
         // Test arguments
         let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
-        assert_eq!(args.len(), 4); // input, verbose, no-verbose
+        assert_eq!(args.len(), 5); // input, verbose, no-verbose
 
         // Test input argument
         let input_arg = args.iter().find(|a| a.get_id() == "input").unwrap();
