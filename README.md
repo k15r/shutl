@@ -52,7 +52,7 @@ Create shell scripts in the `~/.shutl` directory with metadata comments:
 #@arg:... - Additional arguments
 
 # Your script logic here
-if [ "$SHUTL_DRY_RUN" = true ]; then
+if [ "$SHUTL_DRY_RUN" = "true" ]; then
   echo "Dry run mode enabled"
 fi
 
@@ -94,9 +94,22 @@ To enable command completion, add the following to your shell configuration file
 | Flags        | `#@flag:name - Boolean flag [bool]`                                                   |
 | Flags        | `#@flag:name - Flag with allowed values [options:allowed-value\|other-allowed-value]` |
 | Flags        | `#@flag:name - Required Flag [required]`                                              |
-| Flags        | `#@flag:name - Flag with file as value [file]`                                        |
-| Flags        | `#@flag:name - Flag with directory as value [dir]`                                    |
-| Flags        | `#@flag:name - Flag with anypath as value [path]`                                     |
+| Flags        | `#@flag:name - Flag with file completion [file]`                                      |
+| Flags        | `#@flag:name - Flag with file completion from directory [file:~/path]`                |
+| Flags        | `#@flag:name - Flag with file completion with env override [file:~/path:ENV_VAR]`     |
+| Flags        | `#@flag:name - Flag with directory completion [dir]`                                  |
+| Flags        | `#@flag:name - Flag with directory completion from directory [dir:~/path]`            |
+| Flags        | `#@flag:name - Flag with directory completion with env override [dir:~/path:ENV_VAR]` |
+| Flags        | `#@flag:name - Flag with any path completion [path]`                                  |
+| Flags        | `#@flag:name - Flag with any path completion from directory [path:~/path]`            |
+| Flags        | `#@flag:name - Flag with any path completion with env override [path:~/path:ENV_VAR]` |
+
+The `file`, `dir`, and `path` annotations support an optional environment variable override. If the env var is set, it will be used instead of the default path for shell completion. Example:
+
+```bash
+#@flag:config - Configuration file [file:~/.config/myapp:MYAPP_CONFIG_DIR]
+# Completes files from $MYAPP_CONFIG_DIR if set, otherwise ~/.config/myapp
+```
 
 ### Running Commands
 
@@ -117,6 +130,43 @@ Using negated flags:
 shutl example-command --input file.txt --no-dry-run
 ```
 
+## Built-in Commands
+
+### Creating a New Script
+
+```bash
+shutl new <location> <name> [--editor <editor>] [--type <type>] [--no-edit]
+```
+
+- `location`: Directory relative to `~/.shutl` (supports tab completion)
+- `name`: Script name (without .sh extension)
+- `--editor`, `-e`: Editor to use (defaults to `$EDITOR` or `vim`)
+- `--type`, `-t`: Script type: `zsh`, `bash` (default: `zsh`)
+- `--no-edit`: Don't open the script in an editor after creation
+
+Example:
+```bash
+shutl new tools deploy --type bash
+```
+
+### Editing an Existing Script
+
+```bash
+shutl edit <command...> [--editor <editor>]
+```
+
+- `command`: Command path components (e.g., `subdir myscript`)
+- `--editor`, `-e`: Editor to use (defaults to `$EDITOR` or `vim`)
+
+Example:
+```bash
+shutl edit tools deploy
+```
+
+## Environment Variables
+
+- `SHUTL_DIR`: Override the default scripts directory (`~/.shutl`)
+
 ## Project Structure
 
 ```bash
@@ -125,10 +175,21 @@ shutl/
 └── Cargo.toml        # Project dependencies
 
 # Scripts are stored in:
-~/.shutl/            # User's scripts directory
+~/.shutl/            # User's scripts directory (or $SHUTL_DIR)
 ├── command1.sh
 └── subdir/
+    ├── .shutl       # Optional: directory description shown in help
     └── command2.sh
+```
+
+### Directory Descriptions
+
+You can add a `.shutl` file in any directory to provide a description that appears in the help output:
+
+```bash
+# Create a directory with a description
+mkdir -p ~/.shutl/deploy
+echo "Deployment scripts for various environments" > ~/.shutl/deploy/.shutl
 ```
 
 ## Contributing

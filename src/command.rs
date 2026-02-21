@@ -1,7 +1,7 @@
 use crate::get_scripts_dir;
-use crate::metadata::{ArgType, LineType, parse_command_metadata};
+use crate::metadata::{ArgType, Config, LineType, parse_command_metadata};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
-use clap_complete::{ArgValueCompleter, PathCompleter};
+use clap_complete::{ArgValueCompleter, CompletionCandidate, PathCompleter};
 use is_executable::IsExecutable;
 use shellexpand;
 use std::collections::HashMap;
@@ -12,6 +12,64 @@ use std::path::{Path, PathBuf};
 pub struct CommandWithPath {
     pub command: Command,
     pub file_path: std::path::PathBuf,
+}
+
+/// Resolves the completion start directory from complete options.
+/// Checks env var first, then falls back to the default path.
+fn resolve_completion_dir(complete_options: &crate::metadata::CompleteOptions) -> Option<PathBuf> {
+    // Check env var override first
+    if let Some(ref env_var) = complete_options.env_var {
+        if let Ok(env_value) = std::env::var(env_var) {
+            if let Ok(expanded) = shellexpand::full(&env_value) {
+                return Some(PathBuf::from(expanded.to_string()));
+            }
+        }
+    }
+
+    // Fall back to default path
+    if let Some(path_str) = complete_options.path.to_str() {
+        if !path_str.is_empty() {
+            if let Ok(expanded) = shellexpand::full(path_str) {
+                return Some(PathBuf::from(expanded.to_string()));
+            }
+        }
+    }
+
+    None
+}
+
+/// Adds a path completer to an argument based on its config
+fn add_path_completer(arg: Arg, cfg: &Config) -> Arg {
+    match &cfg.arg_type {
+        Some(ArgType::Dir) => {
+            let mut pc = PathCompleter::dir();
+            if let Some(ref complete_options) = cfg.complete_options {
+                if let Some(dir) = resolve_completion_dir(complete_options) {
+                    pc = pc.current_dir(dir);
+                }
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        Some(ArgType::File) => {
+            let mut pc = PathCompleter::file();
+            if let Some(ref complete_options) = cfg.complete_options {
+                if let Some(dir) = resolve_completion_dir(complete_options) {
+                    pc = pc.current_dir(dir);
+                }
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        Some(ArgType::Path) => {
+            let mut pc = PathCompleter::any();
+            if let Some(ref complete_options) = cfg.complete_options {
+                if let Some(dir) = resolve_completion_dir(complete_options) {
+                    pc = pc.current_dir(dir);
+                }
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        _ => arg,
+    }
 }
 
 /// Builds a command for a script file
@@ -54,61 +112,30 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                     arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&cfg.options))
                 }
 
-                match cfg.arg_type {
-                    Some(ArgType::CatchAll) => {
-                        arg = arg.num_args(1..).action(clap::ArgAction::Append);
-                        arg = arg.required(false);
-                    }
-                    Some(ArgType::Dir) => {
-                        let mut pc = PathCompleter::dir();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::File) => {
-                        let mut pc = PathCompleter::file();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::Path) => {
-                        let mut pc = PathCompleter::any();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    _ => {}
+                if let Some(ArgType::CatchAll) = cfg.arg_type {
+                    arg = arg.num_args(1..).action(clap::ArgAction::Append);
+                    arg = arg.required(false);
+                } else {
+                    arg = add_path_completer(arg, cfg);
                 }
 
                 cmd = cmd.arg(arg);
             }
 
             LineType::Flag(name, description, cfg) => {
-                // Skip flags for now
                 let mut arg = Arg::new(name).help(description).long(name);
 
                 if let Some(ArgType::Bool) = cfg.arg_type {
-                    arg = arg.action(clap::ArgAction::SetTrue);
+                    let negated_name = format!("no-{}", name);
+                    arg = arg
+                        .action(clap::ArgAction::SetTrue)
+                        .conflicts_with(&negated_name);
                     cmd = cmd.arg(
-                        Arg::new(format!("no-{}", name))
+                        Arg::new(&negated_name)
                             .help(format!("Disable the '{}' flag", name))
-                            .long(format!("no-{}", name))
-                            .action(clap::ArgAction::SetTrue),
+                            .long(&negated_name)
+                            .action(clap::ArgAction::SetTrue)
+                            .conflicts_with(name),
                     );
                 } else {
                     if cfg.default.is_some() {
@@ -124,42 +151,7 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                     arg = arg.required(true);
                 }
 
-                match &cfg.arg_type {
-                    Some(ArgType::Dir) => {
-                        let mut pc = PathCompleter::dir();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::File) => {
-                        let mut pc = PathCompleter::file();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::Path) => {
-                        let mut pc = PathCompleter::any();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    _ => {}
-                }
+                arg = add_path_completer(arg, cfg);
                 cmd = cmd.arg(arg);
             }
             _ => unreachable!(),
@@ -342,11 +334,141 @@ pub fn build_cli_command() -> Command {
         .author(crate_authors!())
         .disable_help_subcommand(true);
 
+    // Add built-in commands
+    cli = cli
+        .subcommand(build_new_command())
+        .subcommand(build_edit_command());
+
     for cmd_with_path in build_command_tree(&get_scripts_dir(), &active_args) {
         cli = cli.subcommand(cmd_with_path.command);
     }
 
     cli
+}
+
+/// Builds the 'new' subcommand for creating new scripts
+pub fn build_new_command() -> Command {
+    let scripts_dir = get_scripts_dir();
+    Command::new("new")
+        .about("Create a new script")
+        .arg(
+            Arg::new("location")
+                .help("Location to create the script (relative to ~/.shutl)")
+                .default_value("")
+                .required(true)
+                .add(ArgValueCompleter::new(
+                    PathCompleter::dir().current_dir(scripts_dir),
+                )),
+        )
+        .arg(
+            Arg::new("name")
+                .help("Name of the script (without .sh extension)")
+                .required(true),
+        )
+        .arg(
+            Arg::new("editor")
+                .help("Editor to use (defaults to $EDITOR or 'vim')")
+                .long("editor")
+                .short('e'),
+        )
+        .arg(
+            Arg::new("type")
+                .help("Shell type for the script")
+                .long("type")
+                .short('t')
+                .value_parser(clap::builder::PossibleValuesParser::new(vec![
+                    "zsh", "bash",
+                ]))
+                .default_value("zsh"),
+        )
+        .arg(
+            Arg::new("no-edit")
+                .help("Don't open the script in an editor")
+                .long("no-edit")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
+
+/// Builds the 'edit' subcommand for editing existing scripts
+pub fn build_edit_command() -> Command {
+    Command::new("edit")
+        .about("Edit an existing script")
+        .arg(
+            Arg::new("command")
+                .help("Command path components (e.g., 'subdir myscript')")
+                .required(true)
+                .num_args(1..)
+                .add(ArgValueCompleter::new(complete_script_names)),
+        )
+        .arg(
+            Arg::new("editor")
+                .help("Editor to use (defaults to $EDITOR or 'vim')")
+                .long("editor")
+                .short('e'),
+        )
+}
+
+/// Completer for script names in the edit command
+fn complete_script_names(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    complete_script_names_in_dir(current, &get_scripts_dir())
+}
+
+/// Completer for script names in a given directory (testable version)
+fn complete_script_names_in_dir(current: &std::ffi::OsStr, base_dir: &Path) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let parts: Vec<&str> = current_str.split('/').collect();
+
+    // Build the path to search in
+    let mut search_dir = base_dir.to_path_buf();
+    if parts.len() > 1 {
+        for part in &parts[..parts.len() - 1] {
+            search_dir.push(part);
+        }
+    }
+
+    let prefix = parts.last().unwrap_or(&"");
+    let path_prefix = if parts.len() > 1 {
+        parts[..parts.len() - 1].join("/") + "/"
+    } else {
+        String::new()
+    };
+
+    let mut completions = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&search_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+
+            // Skip hidden files
+            if name_str.starts_with('.') {
+                continue;
+            }
+
+            let path = entry.path();
+
+            if path.is_dir() {
+                // Directory - add with trailing slash to indicate more completions
+                if name_str.starts_with(prefix) {
+                    completions.push(CompletionCandidate::new(format!(
+                        "{}{}/",
+                        path_prefix, name_str
+                    )));
+                }
+            } else if path.is_file() && path.is_executable() {
+                // Executable file - strip extension for completion
+                let clean_name = name_str.rsplitn(2, '.').last().unwrap_or(&name_str);
+                if clean_name.starts_with(prefix) {
+                    completions.push(CompletionCandidate::new(format!(
+                        "{}{}",
+                        path_prefix, clean_name
+                    )));
+                }
+            }
+        }
+    }
+
+    completions
 }
 
 #[cfg(test)]
@@ -603,6 +725,28 @@ mod tests {
             no_verbose_arg.get_help().unwrap().to_string(),
             "Disable the 'verbose' flag"
         );
+    }
+
+    #[test]
+    fn test_bool_flag_conflicts() {
+        let script_content = r#"#!/bin/bash
+#@description: Test command
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        // Test that using both --verbose and --no-verbose results in an error
+        let result = cmd_with_path
+            .command
+            .clone()
+            .try_get_matches_from(vec!["test", "--verbose", "--no-verbose"]);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]
@@ -977,5 +1121,79 @@ mod tests {
         // Test non-existent script in existing directory
         let components = vec!["subdir".to_string(), "nonexistent".to_string()];
         assert!(find_script_file_in_dir(&components, &scripts_dir).is_none());
+    }
+
+    #[test]
+    fn test_complete_script_names_root_level() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create test scripts and directories
+        create_test_script(scripts_dir, "script1.sh", "#!/bin/bash");
+        create_test_script(scripts_dir, "script2.sh", "#!/bin/bash");
+        create_test_script(scripts_dir, "other.py", "#!/usr/bin/env python3");
+        fs::create_dir(scripts_dir.join("subdir")).unwrap();
+
+        // Create a hidden file that should be ignored
+        let hidden_path = scripts_dir.join(".hidden.sh");
+        fs::write(&hidden_path, "#!/bin/bash").unwrap();
+        fs::set_permissions(&hidden_path, PermissionsExt::from_mode(0o755)).unwrap();
+
+        // Test empty prefix - should return all scripts and directories
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new(""), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"script1".to_string()));
+        assert!(names.contains(&"script2".to_string()));
+        assert!(names.contains(&"other".to_string()));
+        assert!(names.contains(&"subdir/".to_string()));
+        assert!(!names.iter().any(|n| n.contains(".hidden")));
+
+        // Test prefix filtering
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("script"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"script1".to_string()));
+        assert!(names.contains(&"script2".to_string()));
+        assert!(!names.contains(&"other".to_string()));
+        assert!(!names.contains(&"subdir/".to_string()));
+    }
+
+    #[test]
+    fn test_complete_script_names_nested() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create nested structure
+        let subdir = scripts_dir.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        create_test_script(&subdir, "nested1.sh", "#!/bin/bash");
+        create_test_script(&subdir, "nested2.sh", "#!/bin/bash");
+        fs::create_dir(subdir.join("deeper")).unwrap();
+
+        // Test completion in subdirectory
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"subdir/nested1".to_string()));
+        assert!(names.contains(&"subdir/nested2".to_string()));
+        assert!(names.contains(&"subdir/deeper/".to_string()));
+
+        // Test prefix filtering in subdirectory
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/nested1"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"subdir/nested1".to_string()));
+        assert!(!names.contains(&"subdir/nested2".to_string()));
+    }
+
+    #[test]
+    fn test_complete_script_names_nonexistent_dir() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Test completion in non-existent directory returns empty
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
+        assert!(completions.is_empty());
     }
 }

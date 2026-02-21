@@ -27,7 +27,7 @@ pub enum ArgType {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompleteOptions {
     pub path: PathBuf,
-    pub extensions: Vec<String>,
+    pub env_var: Option<String>,
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -41,10 +41,6 @@ pub struct Config {
 
 pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     let mut metadata = CommandMetadata::default();
-    let comment_prefix = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("js") => "//@",
-        _ => "#@",
-    };
 
     if let Ok(contents) = fs::read_to_string(path) {
         let lines = contents.lines().collect::<Vec<_>>();
@@ -54,8 +50,8 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
             0
         };
 
-        while i < lines.len() && lines[i].starts_with(comment_prefix) {
-            let line = lines[i].trim_start_matches(comment_prefix).trim();
+        while i < lines.len() && lines[i].starts_with("#@") {
+            let line = lines[i].trim_start_matches("#@").trim();
             let parsed_line = parse_line(line);
             if let Some(parsed) = parsed_line {
                 match parsed {
@@ -144,10 +140,11 @@ fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
                 };
                 cfg.arg_type = Some(arg_type);
                 if !value.trim().is_empty() {
-                    cfg.complete_options = Some(CompleteOptions {
-                        path: PathBuf::from(value.trim()),
-                        extensions: Vec::new(),
-                    });
+                    // Parse format: [file:default_path:ENV_VAR] or [file:default_path]
+                    let parts: Vec<&str> = value.trim().splitn(2, ':').collect();
+                    let path = PathBuf::from(parts[0].trim());
+                    let env_var = parts.get(1).map(|s| s.trim().to_string());
+                    cfg.complete_options = Some(CompleteOptions { path, env_var });
                 }
             }
             "options" => {
@@ -173,6 +170,15 @@ fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
             _ => {}
         }
     }
+
+    // Warn if both required and default are set (contradictory)
+    if cfg.required && cfg.default.is_some() {
+        log::warn!(
+            "Argument has both 'required' and 'default' set - 'required' will be ignored"
+        );
+        cfg.required = false;
+    }
+
     Some(cfg)
 }
 
@@ -304,7 +310,7 @@ mod tests {
             )
         );
 
-        // Test output-dir flag
+        // Test output-dir flag (required is ignored because default is set)
         let output_dir_flag = &metadata.arguments[5];
         assert_eq!(
             output_dir_flag,
@@ -314,7 +320,7 @@ mod tests {
                 Config {
                     default: Some("./output".to_string()),
                     arg_type: Some(ArgType::Dir),
-                    required: true,
+                    required: false, // required is ignored when default is set
                     ..Default::default()
                 }
             )
@@ -343,6 +349,131 @@ mod tests {
                 "Enable debug mode".to_string(),
                 Config {
                     arg_type: Some(ArgType::Bool),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_required_with_default_ignored() {
+        // When both required and default are set, required should be ignored
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:test-flag - Test flag [required,default:value]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "test-flag".to_string(),
+                "Test flag".to_string(),
+                Config {
+                    default: Some("value".to_string()),
+                    required: false, // should be false because default is set
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_file_with_start_directory() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:input - Input file [file:~/Documents]
+#@arg:config - Config file [file:/etc]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        // Test flag with file and start directory
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("~/Documents"),
+                        env_var: None,
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+
+        // Test arg with file and start directory
+        let arg = &metadata.arguments[1];
+        assert_eq!(
+            arg,
+            &LineType::Positional(
+                "config".to_string(),
+                "Config file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("/etc"),
+                        env_var: None,
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_file_with_env_var_override() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:input - Input file [file:~/Documents:INPUT_DIR]
+#@arg:config - Config file [dir:/etc:CONFIG_DIR]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        // Test flag with file, start directory, and env var
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("~/Documents"),
+                        env_var: Some("INPUT_DIR".to_string()),
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+
+        // Test arg with dir, start directory, and env var
+        let arg = &metadata.arguments[1];
+        assert_eq!(
+            arg,
+            &LineType::Positional(
+                "config".to_string(),
+                "Config file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Dir),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("/etc"),
+                        env_var: Some("CONFIG_DIR".to_string()),
+                    }),
                     ..Default::default()
                 }
             )

@@ -1,47 +1,26 @@
 use clap::ArgMatches;
-use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir};
-use std::env;
+use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir, resolve_editor};
 use std::process::Command;
-use std::string::String;
 
 fn main() {
     env_logger::builder().init();
 
-    let args: Vec<String> = std::env::args().collect();
-
-    // write the args to a file all args on one line
-    log::debug!("args: {:?}", args);
+    log::debug!("args: {:?}", std::env::args().collect::<Vec<_>>());
 
     clap_complete::CompleteEnv::with_factory(build_cli_command).complete();
-    // Build the CLI command structure
-    let mut cli = build_cli_command();
 
-    cli = add_new_and_edit_cmd(&mut cli);
-
+    let cli = build_cli_command();
     let mut cli_for_help = cli.clone();
-
-    // Get matches for command processing
     let matches = cli.get_matches();
 
-    // Handle the new command
-    if let Some(("new", new_matches)) = matches.subcommand() {
-        handle_new(new_matches);
-    }
-
-    // Handle the edit command
-    if let Some(("edit", edit_matches)) = matches.subcommand() {
-        handle_edit(edit_matches);
-    }
-
-    // Show help if no command is provided
-    if matches.subcommand().is_none() {
-        cli_for_help.print_help().unwrap();
-        std::process::exit(1);
-    }
-
-    // Find the matching command and execute it
-    if let Some((command, sub_m)) = matches.subcommand() {
-        execute_command(command, sub_m);
+    match matches.subcommand() {
+        Some(("new", sub_matches)) => handle_new(sub_matches),
+        Some(("edit", sub_matches)) => handle_edit(sub_matches),
+        Some((command, sub_matches)) => execute_command(command, sub_matches),
+        None => {
+            cli_for_help.print_help().unwrap();
+            std::process::exit(1);
+        }
     }
 }
 
@@ -85,20 +64,25 @@ fn execute_command(command: &str, sub_m: &ArgMatches) {
 }
 
 fn handle_edit(edit_matches: &ArgMatches) {
-    let components: Vec<String> = edit_matches
+    let raw_components: Vec<String> = edit_matches
         .get_many::<String>("command")
         .unwrap()
         .map(|s| s.to_string())
         .collect();
+
+    // Flatten components. split any path separators into separate components
+    let components: Vec<String> = raw_components
+        .iter()
+        .flat_map(|s| s.split('/'))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
     let editor = edit_matches.get_one::<String>("editor");
 
     // Find the script file in the command structure
     if let Some(script_path) = find_script_file(&components) {
-        // Open in editor
-        let editor = editor
-            .map(|e| e.to_string())
-            .or_else(|| env::var("EDITOR").ok())
-            .unwrap_or_else(|| "vim".to_string());
+        let editor = resolve_editor(editor);
 
         Command::new(&editor)
             .arg(&script_path)
@@ -106,7 +90,6 @@ fn handle_edit(edit_matches: &ArgMatches) {
             .expect("Failed to open editor");
 
         println!("Edited script: {}", script_path.display());
-        std::process::exit(0);
     } else {
         eprintln!("Script not found: {}", components.join("/"));
         std::process::exit(1);
@@ -117,6 +100,7 @@ fn handle_new(new_matches: &ArgMatches) {
     let name = new_matches.get_one::<String>("name").unwrap();
     let location = new_matches.get_one::<String>("location").unwrap();
     let editor = new_matches.get_one::<String>("editor");
+    let script_type = new_matches.get_one::<String>("type").unwrap();
     let no_edit = new_matches.get_flag("no-edit");
 
     // Build the script path
@@ -124,38 +108,53 @@ fn handle_new(new_matches: &ArgMatches) {
     if !location.is_empty() {
         script_path.push(location);
     }
-    let with_extension = &format!("{}.sh", name);
-    script_path.push(if name.ends_with(".sh") {
-        name
+
+    let extension = "sh";
+    let with_extension = format!("{}.{}", name, extension);
+    let script_name = if name.contains('.') {
+        name.to_string()
     } else {
         with_extension
-    });
+    };
+    script_path.push(&script_name);
 
     // Ensure parent directories exist
     if let Some(parent) = script_path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("Failed to create directory {}: {}", parent.display(), e);
+            std::process::exit(1);
+        }
     }
 
     // Write the script template
+    let shebang = match script_type.as_str() {
+        "bash" => "#!/bin/bash",
+        _ => "#!/bin/zsh",
+    };
+
     let template = format!(
-        "#!/bin/bash\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
-        name.trim_end_matches(".sh")
+        "{}\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
+        shebang,
+        name.trim_end_matches(&format!(".{}", extension))
     );
-    std::fs::write(&script_path, template).unwrap();
+
+    if let Err(e) = std::fs::write(&script_path, template) {
+        eprintln!("Failed to write script {}: {}", script_path.display(), e);
+        std::process::exit(1);
+    }
 
     // Make the script executable
-    std::fs::set_permissions(
+    if let Err(e) = std::fs::set_permissions(
         &script_path,
         std::os::unix::fs::PermissionsExt::from_mode(0o755),
-    )
-    .unwrap();
+    ) {
+        eprintln!("Failed to set permissions on {}: {}", script_path.display(), e);
+        std::process::exit(1);
+    }
 
     // Open the script in an editor if required
     if !no_edit {
-        let editor = editor
-            .cloned()
-            .or_else(|| env::var("EDITOR").ok())
-            .unwrap_or_else(|| "vim".to_string());
+        let editor = resolve_editor(editor);
 
         Command::new(editor)
             .arg(&script_path)
@@ -164,66 +163,4 @@ fn handle_new(new_matches: &ArgMatches) {
     }
 
     println!("Created script: {}", script_path.display());
-    std::process::exit(0);
-}
-
-fn add_new_and_edit_cmd(cli: &mut clap::Command) -> clap::Command {
-    // Add the new command
-    let mut cli_cmd = cli.clone();
-    cli_cmd = cli_cmd.subcommand(
-        clap::Command::new("new")
-            .about("Create a new script")
-            .arg(
-                clap::Arg::new("location")
-                    .help("Location to create the script (relative to ~/.shutl)")
-                    .default_value("")
-                    .required(true),
-            )
-            .arg(
-                clap::Arg::new("name")
-                    .help("Name of the script (without .sh extension)")
-                    .required(true),
-            )
-            .arg(
-                clap::Arg::new("editor")
-                    .help("Editor to use (defaults to $EDITOR or 'vim')")
-                    .long("editor")
-                    .short('e'),
-            )
-            .arg(
-                clap::Arg::new("type")
-                    .help("Type of script (e.g., bash, python)")
-                    .long("type")
-                    .short('t')
-                    .value_parser(clap::builder::PossibleValuesParser::new(vec![
-                        "zsh", "bash", "python", "ruby", "node",
-                    ]))
-                    .default_value("zsh"),
-            )
-            .arg(
-                clap::Arg::new("no-edit")
-                    .help("Don't open the script in an editor")
-                    .long("no-edit")
-                    .action(clap::ArgAction::SetTrue),
-            ),
-    );
-
-    // Add the edit command
-    cli_cmd = cli_cmd.subcommand(
-        clap::Command::new("edit")
-            .about("Edit an existing script")
-            .arg(
-                clap::Arg::new("command")
-                    .help("Command path components (e.g., 'subdir myscript')")
-                    .required(true)
-                    .num_args(1..),
-            )
-            .arg(
-                clap::Arg::new("editor")
-                    .help("Editor to use (defaults to $EDITOR or 'vim')")
-                    .long("editor")
-                    .short('e'),
-            ),
-    );
-    cli_cmd
 }
