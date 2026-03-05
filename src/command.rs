@@ -337,7 +337,8 @@ pub fn build_cli_command() -> Command {
     // Add built-in commands
     cli = cli
         .subcommand(build_new_command())
-        .subcommand(build_edit_command());
+        .subcommand(build_edit_command())
+        .subcommand(build_list_command());
 
     for cmd_with_path in build_command_tree(&get_scripts_dir(), &active_args) {
         cli = cli.subcommand(cmd_with_path.command);
@@ -406,6 +407,168 @@ pub fn build_edit_command() -> Command {
                 .long("editor")
                 .short('e'),
         )
+}
+
+/// Builds the 'list' subcommand for listing available scripts
+pub fn build_list_command() -> Command {
+    Command::new("list")
+        .about("List available scripts")
+        .arg(
+            Arg::new("subdirectory")
+                .help("Only list scripts under this subdirectory")
+                .required(false),
+        )
+        .arg(
+            Arg::new("tree")
+                .help("Show hierarchical tree view")
+                .long("tree")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
+
+/// An entry representing a script found during listing
+pub struct ListEntry {
+    pub path: String,
+    pub description: String,
+}
+
+/// Lists all scripts in the given directory, optionally filtered to a subdirectory.
+/// Returns a formatted string ready for display.
+pub fn list_scripts(base_dir: &Path, subdir_filter: Option<&str>, tree: bool) -> String {
+    let search_dir = if let Some(subdir) = subdir_filter {
+        let p = base_dir.join(subdir);
+        if !p.is_dir() {
+            return format!("Directory not found: {}", subdir);
+        }
+        p
+    } else {
+        base_dir.to_path_buf()
+    };
+
+    let prefix = subdir_filter.unwrap_or("");
+    let mut entries = Vec::new();
+    collect_scripts(&search_dir, prefix, &mut entries);
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    if entries.is_empty() {
+        return "No scripts found.".to_string();
+    }
+
+    if tree {
+        format_tree(&entries)
+    } else {
+        format_flat(&entries)
+    }
+}
+
+fn collect_scripts(dir: &Path, prefix: &str, entries: &mut Vec<ListEntry>) {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+
+    let (mut directories, mut files): (Vec<_>, Vec<_>) = read_dir
+        .filter_map(Result::ok)
+        .partition(|entry| entry.path().is_dir());
+
+    directories.retain(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
+    directories.sort_by_key(|e| e.file_name());
+    files.retain(|entry| {
+        !entry.file_name().to_string_lossy().starts_with('.')
+            && entry.path().is_file()
+            && entry.path().is_executable()
+    });
+    files.sort_by_key(|e| e.file_name());
+
+    for entry in &files {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+        let metadata = parse_command_metadata(&entry.path());
+        let path = if prefix.is_empty() {
+            clean_name
+        } else {
+            format!("{}/{}", prefix, clean_name)
+        };
+        entries.push(ListEntry {
+            path,
+            description: metadata.description,
+        });
+    }
+
+    for entry in &directories {
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let sub_prefix = if prefix.is_empty() {
+            dir_name.clone()
+        } else {
+            format!("{}/{}", prefix, dir_name)
+        };
+        collect_scripts(&entry.path(), &sub_prefix, entries);
+    }
+}
+
+fn format_flat(entries: &[ListEntry]) -> String {
+    let max_path_len = entries.iter().map(|e| e.path.len()).max().unwrap_or(0);
+    entries
+        .iter()
+        .map(|e| {
+            if e.description.is_empty() {
+                e.path.clone()
+            } else {
+                format!("{:<width$}  {}", e.path, e.description, width = max_path_len)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_tree(entries: &[ListEntry]) -> String {
+    let mut lines = Vec::new();
+    let mut current_dir: Option<String> = None;
+    let max_name_len = entries
+        .iter()
+        .map(|e| {
+            e.path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&e.path)
+                .len()
+        })
+        .max()
+        .unwrap_or(0);
+
+    for entry in entries {
+        if let Some(slash_pos) = entry.path.rfind('/') {
+            let dir = &entry.path[..slash_pos];
+            let name = &entry.path[slash_pos + 1..];
+            if current_dir.as_deref() != Some(dir) {
+                lines.push(format!("{}/", dir));
+                current_dir = Some(dir.to_string());
+            }
+            if entry.description.is_empty() {
+                lines.push(format!("  {}", name));
+            } else {
+                lines.push(format!(
+                    "  {:<width$}  {}",
+                    name,
+                    entry.description,
+                    width = max_name_len
+                ));
+            }
+        } else {
+            current_dir = None;
+            if entry.description.is_empty() {
+                lines.push(entry.path.clone());
+            } else {
+                lines.push(format!(
+                    "{:<width$}  {}",
+                    entry.path,
+                    entry.description,
+                    width = max_name_len
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
 }
 
 /// Completer for script names in the edit command
@@ -1195,5 +1358,132 @@ mod tests {
         // Test completion in non-existent directory returns empty
         let completions = complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
         assert!(completions.is_empty());
+    }
+
+    #[test]
+    fn test_list_scripts_flat() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create nested structure
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+        create_test_script(
+            &docker_dir,
+            "push.sh",
+            "#!/bin/bash\n#@description: Push image to registry",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, None, false);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("docker/build"));
+        assert!(lines[0].contains("Build a Docker image"));
+        assert!(lines[1].starts_with("docker/push"));
+        assert!(lines[1].contains("Push image to registry"));
+        assert!(lines[2].starts_with("hello"));
+        assert!(lines[2].contains("Say hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_tree() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+        create_test_script(
+            &docker_dir,
+            "push.sh",
+            "#!/bin/bash\n#@description: Push image to registry",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, None, true);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "docker/");
+        assert!(lines[1].contains("build"));
+        assert!(lines[1].contains("Build a Docker image"));
+        assert!(lines[2].contains("push"));
+        assert!(lines[2].contains("Push image to registry"));
+        assert!(lines[3].contains("hello"));
+        assert!(lines[3].contains("Say hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_filtered() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+
+        let k8s_dir = scripts_dir.join("k8s");
+        fs::create_dir(&k8s_dir).unwrap();
+        create_test_script(
+            &k8s_dir,
+            "deploy.sh",
+            "#!/bin/bash\n#@description: Deploy to Kubernetes",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, Some("docker"), false);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("docker/build"));
+        assert!(lines[0].contains("Build a Docker image"));
+        // k8s and hello should NOT appear
+        assert!(!output.contains("k8s"));
+        assert!(!output.contains("hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_empty() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let output = list_scripts(scripts_dir, None, false);
+        assert_eq!(output, "No scripts found.");
+    }
+
+    #[test]
+    fn test_list_scripts_nonexistent_subdir() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let output = list_scripts(scripts_dir, Some("nonexistent"), false);
+        assert_eq!(output, "Directory not found: nonexistent");
     }
 }

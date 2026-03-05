@@ -1,5 +1,6 @@
 use clap::ArgMatches;
 use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir, resolve_editor};
+use shutl::command::list_scripts;
 use std::process::Command;
 
 fn main() {
@@ -16,6 +17,7 @@ fn main() {
     match matches.subcommand() {
         Some(("new", sub_matches)) => handle_new(sub_matches),
         Some(("edit", sub_matches)) => handle_edit(sub_matches),
+        Some(("list", sub_matches)) => handle_list(sub_matches),
         Some((command, sub_matches)) => execute_command(command, sub_matches),
         None => {
             cli_for_help.print_help().unwrap();
@@ -61,6 +63,13 @@ fn execute_command(command: &str, sub_m: &ArgMatches) {
         eprintln!("Script not found: {}", components.join("/"));
         std::process::exit(1);
     }
+}
+
+fn handle_list(list_matches: &ArgMatches) {
+    let subdir = list_matches.get_one::<String>("subdirectory").map(|s| s.as_str());
+    let tree = list_matches.get_flag("tree");
+    let output = list_scripts(&get_scripts_dir(), subdir, tree);
+    println!("{}", output);
 }
 
 fn handle_edit(edit_matches: &ArgMatches) {
