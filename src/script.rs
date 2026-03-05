@@ -101,8 +101,9 @@ pub fn find_script_file_in_dir(
         return Some(path);
     }
 
-    // Check for files starting with the last component in the parent directory
+    // Check for files with the same stem in the parent directory
     path.pop();
+    let last = components.last()?;
     std::fs::read_dir(&path)
         .ok()?
         .filter_map(Result::ok)
@@ -110,11 +111,8 @@ pub fn find_script_file_in_dir(
             if entry.path().is_dir() {
                 return None;
             }
-            entry
-                .file_name()
-                .to_str()?
-                .starts_with(components.last()?)
-                .then_some(entry.path())
+            let file_stem = entry.path().file_stem()?.to_str()?.to_string();
+            (file_stem == *last).then_some(entry.path())
         })
 }
 
@@ -173,6 +171,32 @@ mod tests {
 
         // Test non-existent script
         let components = vec!["nonexistent".to_string()];
+        assert!(find_script_file_in_dir(&components, &scripts_dir).is_none());
+    }
+
+    #[test]
+    fn test_find_script_file_no_prefix_match() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path().join(".shutl");
+        std::fs::create_dir(&scripts_dir).unwrap();
+
+        // Create scripts where one name is a prefix of the other
+        create_test_script(&scripts_dir, "test.sh", "#!/bin/bash");
+        create_test_script(&scripts_dir, "test2.sh", "#!/bin/bash");
+        create_test_script(&scripts_dir, "testing.sh", "#!/bin/bash");
+
+        // "test" should match "test.sh" exactly, not "test2.sh" or "testing.sh"
+        let components = vec!["test".to_string()];
+        let script_path = find_script_file_in_dir(&components, &scripts_dir).unwrap();
+        assert_eq!(script_path.file_name().unwrap(), "test.sh");
+
+        // "test2" should match "test2.sh", not "test.sh"
+        let components = vec!["test2".to_string()];
+        let script_path = find_script_file_in_dir(&components, &scripts_dir).unwrap();
+        assert_eq!(script_path.file_name().unwrap(), "test2.sh");
+
+        // "tes" should not match anything
+        let components = vec!["tes".to_string()];
         assert!(find_script_file_in_dir(&components, &scripts_dir).is_none());
     }
 

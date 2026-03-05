@@ -99,12 +99,11 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     }
 
     for cmdarg in &metadata.arguments {
-        // Check if the argument is a positional argument
         match cmdarg {
             LineType::Positional(name, description, cfg) => {
                 let mut arg = Arg::new(name).help(description);
-                arg = if let Some(default_value) = cfg.clone().default {
-                    arg.default_value(default_value)
+                arg = if let Some(ref default_value) = cfg.default {
+                    arg.default_value(default_value.clone())
                 } else {
                     arg.required(true)
                 };
@@ -138,8 +137,8 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                             .conflicts_with(name),
                     );
                 } else {
-                    if cfg.default.is_some() {
-                        arg = arg.default_value(cfg.default.clone().unwrap());
+                    if let Some(ref default) = cfg.default {
+                        arg = arg.default_value(default.clone());
                     }
                     if !cfg.options.is_empty() {
                         arg = arg
@@ -165,21 +164,20 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
 }
 
 /// Builds a list of commands from a directory
-pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<CommandWithPath> {
+pub fn build_command_tree(dir_path: &Path, active_args: &[String]) -> Vec<CommandWithPath> {
     log::debug!(
         "build_command_tree: dir_path {:?}, active_args: {:?}",
         dir_path,
         active_args
     );
     let mut commands = Vec::new();
-    let mut active_args = active_args.clone();
     let first_arg = active_args.first().cloned().unwrap_or_default();
-    active_args = active_args.into_iter().skip(1).collect();
+    let rest = if active_args.is_empty() { &[] } else { &active_args[1..] };
 
     log::debug!(
         "build_command_tree: First arg: {:?}, active_args(rest): {:?}",
         first_arg,
-        active_args
+        rest
     );
 
     if first_arg.is_empty() {
@@ -198,7 +196,7 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         let dir_cmd = add_dir_subcommands(
             dir_command(&first_arg_path, &dir_name),
             &first_arg_path,
-            &active_args,
+            rest,
         );
         commands.push(CommandWithPath {
             command: dir_cmd,
@@ -207,19 +205,18 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         return commands;
     }
 
-    let (is_script, script_path) = is_script_file(dir_path, &first_arg);
-    if is_script {
+    if let Some(script_path) = find_script_file(dir_path, &first_arg) {
         commands.push(build_script_command(first_arg, &script_path));
         return commands;
     }
 
-    build_command_tree(dir_path, &active_args)
+    build_command_tree(dir_path, rest)
 }
 
 fn add_dir_subcommands(
     mut dir_cmd: Command,
     first_arg_path: &Path,
-    active_args: &Vec<String>,
+    active_args: &[String],
 ) -> Command {
     for subcmd in build_command_tree(first_arg_path, active_args) {
         log::debug!(
@@ -294,10 +291,10 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
     commands
 }
 
-fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
+fn find_script_file(dir_path: &Path, name: &str) -> Option<PathBuf> {
     let script_path = dir_path.join(name);
     if script_path.is_file() && script_path.is_executable() {
-        return (true, script_path);
+        return Some(script_path);
     }
 
     if let Ok(entries) = fs::read_dir(dir_path) {
@@ -305,12 +302,15 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
             let path = entry.path();
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
             if path.is_file() && filename.rsplitn(2, ".").last().unwrap_or(&filename) == name {
-                return (path.is_executable(), path);
+                if path.is_executable() {
+                    return Some(path);
+                }
+                return None;
             }
         }
     }
 
-    (false, PathBuf::new())
+    None
 }
 
 /// Builds the complete CLI command structure
@@ -651,7 +651,7 @@ mod tests {
     }
 
     fn validate_arg(
-        args: &Vec<&Arg>,
+        args: &[&Arg],
         name: &str,
         description: &str,
         is_required: bool,
@@ -783,7 +783,7 @@ mod tests {
             "#!/bin/bash\n#@description: subdir script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec!["subdir".to_string()]);
+        let commands = build_command_tree(&scripts_dir, &["subdir".to_string()]);
 
         // Test root level command
         assert_eq!(commands.len(), 1); // root.sh and subdir
@@ -833,7 +833,7 @@ mod tests {
         );
         create_test_script(&subdir, "sub.sh", "#!/bin/bash\n#@description: Sub script");
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Test root level command
         assert_eq!(commands.len(), 2); // root.sh and subdir
@@ -876,7 +876,7 @@ mod tests {
             "#!/bin/bash\n#@description: Test script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec!["test_dir".to_string()]);
+        let commands = build_command_tree(&scripts_dir, &["test_dir".to_string()]);
 
         // Test directory command
         assert_eq!(commands.len(), 1); // only the directory command
@@ -914,7 +914,7 @@ mod tests {
             "#!/bin/bash\n#@description: Hidden script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Test that only visible items are included
         assert_eq!(commands.len(), 2); // visible.sh and visible directory
@@ -1007,7 +1007,7 @@ mod tests {
             "#!/bin/bash\n#@description: Test script in subdirectory",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Verify both commands exist with different names
         assert_eq!(commands.len(), 2);
@@ -1038,7 +1038,7 @@ mod tests {
             "#!/bin/bash\n#@description: Second test script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Verify both commands exist with different names
         assert_eq!(commands.len(), 2);

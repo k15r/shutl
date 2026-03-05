@@ -43,25 +43,25 @@ pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     let mut metadata = CommandMetadata::default();
 
     if let Ok(contents) = fs::read_to_string(path) {
-        let lines = contents.lines().collect::<Vec<_>>();
-        let mut i = if lines.first().is_some_and(|line| line.starts_with("#!")) {
-            1
-        } else {
-            0
-        };
-
-        while i < lines.len() && lines[i].starts_with("#@") {
-            let line = lines[i].trim_start_matches("#@").trim();
-            let parsed_line = parse_line(line);
-            if let Some(parsed) = parsed_line {
-                match parsed {
-                    LineType::Description(desc) => metadata.description = desc,
-                    _ => {
-                        metadata.arguments.push(parsed);
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("#!") {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("#@") {
+                if let Some(parsed) = parse_line(rest.trim()) {
+                    match parsed {
+                        LineType::Description(desc) => metadata.description = desc,
+                        _ => metadata.arguments.push(parsed),
                     }
                 }
+            } else if trimmed.starts_with('#') {
+                // Regular comment — skip but keep parsing
+                continue;
+            } else {
+                // First non-comment line — stop parsing
+                break;
             }
-            i += 1;
         }
     }
 
@@ -474,6 +474,73 @@ mod tests {
                         path: PathBuf::from("/etc"),
                         env_var: Some("CONFIG_DIR".to_string()),
                     }),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_metadata_stops_at_code() {
+        // Metadata after a non-comment line should be ignored
+        let script_content = r#"#!/bin/bash
+#@description: My tool
+#@arg:input - Input file
+
+echo "some code"
+
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.description, "My tool");
+        assert_eq!(metadata.arguments.len(), 1);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config::default()
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_metadata_skips_blank_lines_and_comments() {
+        // Blank lines and regular comments within the header block should be skipped
+        let script_content = r#"#!/bin/bash
+#@description: My tool
+
+# This is a regular comment
+#@arg:input - Input file
+
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.description, "My tool");
+        assert_eq!(metadata.arguments.len(), 2);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config::default()
+            )
+        );
+        assert_eq!(
+            metadata.arguments[1],
+            LineType::Flag(
+                "verbose".to_string(),
+                "Enable verbose output".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Bool),
                     ..Default::default()
                 }
             )

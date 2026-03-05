@@ -100,8 +100,11 @@ fn handle_new(new_matches: &ArgMatches) {
     let name = new_matches.get_one::<String>("name").unwrap();
     let location = new_matches.get_one::<String>("location").unwrap();
     let editor = new_matches.get_one::<String>("editor");
-    let script_type = new_matches.get_one::<String>("type").unwrap();
     let no_edit = new_matches.get_flag("no-edit");
+    let script_type = new_matches
+        .get_one::<String>("type")
+        .map(|s| s.as_str())
+        .unwrap_or("zsh");
 
     // Build the script path
     let mut script_path = get_scripts_dir();
@@ -109,8 +112,7 @@ fn handle_new(new_matches: &ArgMatches) {
         script_path.push(location);
     }
 
-    let extension = "sh";
-    let with_extension = format!("{}.{}", name, extension);
+    let with_extension = format!("{}.sh", name);
     let script_name = if name.contains('.') {
         name.to_string()
     } else {
@@ -126,16 +128,16 @@ fn handle_new(new_matches: &ArgMatches) {
         }
     }
 
-    // Write the script template
-    let shebang = match script_type.as_str() {
+    let shebang = match script_type {
         "bash" => "#!/bin/bash",
         _ => "#!/bin/zsh",
     };
 
+    // Write the script template
     let template = format!(
         "{}\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
         shebang,
-        name.trim_end_matches(&format!(".{}", extension))
+        name.trim_end_matches(".sh"),
     );
 
     if let Err(e) = std::fs::write(&script_path, template) {
