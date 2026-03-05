@@ -28,6 +28,3 @@ pub fn get_scripts_dir() -> PathBuf {
 
     path
 }
-
-// For backward compatibility
-pub const SCRIPTS_DIR: &str = SCRIPTS_DIR_NAME;

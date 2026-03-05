@@ -23,25 +23,14 @@ fn main() {
     // Get matches for command processing
     let matches = cli.get_matches();
 
-    // Handle the new command
-    if let Some(("new", new_matches)) = matches.subcommand() {
-        handle_new(new_matches);
-    }
-
-    // Handle the edit command
-    if let Some(("edit", edit_matches)) = matches.subcommand() {
-        handle_edit(edit_matches);
-    }
-
-    // Show help if no command is provided
-    if matches.subcommand().is_none() {
-        cli_for_help.print_help().unwrap();
-        std::process::exit(1);
-    }
-
-    // Find the matching command and execute it
-    if let Some((command, sub_m)) = matches.subcommand() {
-        execute_command(command, sub_m);
+    match matches.subcommand() {
+        Some(("new", new_matches)) => handle_new(new_matches),
+        Some(("edit", edit_matches)) => handle_edit(edit_matches),
+        Some((command, sub_m)) => execute_command(command, sub_m),
+        None => {
+            cli_for_help.print_help().unwrap();
+            std::process::exit(1);
+        }
     }
 }
 
@@ -118,6 +107,10 @@ fn handle_new(new_matches: &ArgMatches) {
     let location = new_matches.get_one::<String>("location").unwrap();
     let editor = new_matches.get_one::<String>("editor");
     let no_edit = new_matches.get_flag("no-edit");
+    let script_type = new_matches
+        .get_one::<String>("type")
+        .map(|s| s.as_str())
+        .unwrap_or("zsh");
 
     // Build the script path
     let mut script_path = get_scripts_dir();
@@ -136,10 +129,16 @@ fn handle_new(new_matches: &ArgMatches) {
         std::fs::create_dir_all(parent).unwrap();
     }
 
+    let shebang = match script_type {
+        "bash" => "#!/bin/bash",
+        _ => "#!/bin/zsh",
+    };
+
     // Write the script template
     let template = format!(
-        "#!/bin/bash\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
-        name.trim_end_matches(".sh")
+        "{}\n#@description: {}\n#@arg:input - Input file\n#@flag:verbose - Enable verbose output\n",
+        shebang,
+        name.trim_end_matches(".sh"),
     );
     std::fs::write(&script_path, template).unwrap();
 
@@ -192,11 +191,11 @@ fn add_new_and_edit_cmd(cli: &mut clap::Command) -> clap::Command {
             )
             .arg(
                 clap::Arg::new("type")
-                    .help("Type of script (e.g., bash, python)")
+                    .help("Type of shell script")
                     .long("type")
                     .short('t')
                     .value_parser(clap::builder::PossibleValuesParser::new(vec![
-                        "zsh", "bash", "python", "ruby", "node",
+                        "zsh", "bash",
                     ]))
                     .default_value("zsh"),
             )
