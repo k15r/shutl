@@ -18,21 +18,19 @@ pub struct CommandWithPath {
 /// Checks env var first, then falls back to the default path.
 fn resolve_completion_dir(complete_options: &crate::metadata::CompleteOptions) -> Option<PathBuf> {
     // Check env var override first
-    if let Some(ref env_var) = complete_options.env_var {
-        if let Ok(env_value) = std::env::var(env_var) {
-            if let Ok(expanded) = shellexpand::full(&env_value) {
-                return Some(PathBuf::from(expanded.to_string()));
-            }
-        }
+    if let Some(ref env_var) = complete_options.env_var
+        && let Ok(env_value) = std::env::var(env_var)
+        && let Ok(expanded) = shellexpand::full(&env_value)
+    {
+        return Some(PathBuf::from(expanded.to_string()));
     }
 
     // Fall back to default path
-    if let Some(path_str) = complete_options.path.to_str() {
-        if !path_str.is_empty() {
-            if let Ok(expanded) = shellexpand::full(path_str) {
-                return Some(PathBuf::from(expanded.to_string()));
-            }
-        }
+    if let Some(path_str) = complete_options.path.to_str()
+        && !path_str.is_empty()
+        && let Ok(expanded) = shellexpand::full(path_str)
+    {
+        return Some(PathBuf::from(expanded.to_string()));
     }
 
     None
@@ -43,28 +41,28 @@ fn add_path_completer(arg: Arg, cfg: &Config) -> Arg {
     match &cfg.arg_type {
         Some(ArgType::Dir) => {
             let mut pc = PathCompleter::dir();
-            if let Some(ref complete_options) = cfg.complete_options {
-                if let Some(dir) = resolve_completion_dir(complete_options) {
-                    pc = pc.current_dir(dir);
-                }
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
             }
             arg.add(ArgValueCompleter::new(pc))
         }
         Some(ArgType::File) => {
             let mut pc = PathCompleter::file();
-            if let Some(ref complete_options) = cfg.complete_options {
-                if let Some(dir) = resolve_completion_dir(complete_options) {
-                    pc = pc.current_dir(dir);
-                }
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
             }
             arg.add(ArgValueCompleter::new(pc))
         }
         Some(ArgType::Path) => {
             let mut pc = PathCompleter::any();
-            if let Some(ref complete_options) = cfg.complete_options {
-                if let Some(dir) = resolve_completion_dir(complete_options) {
-                    pc = pc.current_dir(dir);
-                }
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
             }
             arg.add(ArgValueCompleter::new(pc))
         }

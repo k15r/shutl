@@ -73,18 +73,18 @@ fn parse_line(line: &str) -> Option<LineType> {
         return Some(LineType::Description(description.trim().to_string()));
     }
 
-    if let Some(flag) = line.strip_prefix("flag:") {
-        if let Some((clean_name, rest)) = flag.trim().split_once(" - ") {
-            let (name, description, config) = parse_argument(clean_name, rest);
-            return Some(LineType::Flag(name, description, config));
-        }
+    if let Some(flag) = line.strip_prefix("flag:")
+        && let Some((clean_name, rest)) = flag.trim().split_once(" - ")
+    {
+        let (name, description, config) = parse_argument(clean_name, rest);
+        return Some(LineType::Flag(name, description, config));
     }
 
-    if let Some(arg) = line.strip_prefix("arg:") {
-        if let Some((clean_name, rest)) = arg.trim().split_once(" - ") {
-            let (name, description, config) = parse_argument(clean_name, rest);
-            return Some(LineType::Positional(name, description, config));
-        }
+    if let Some(arg) = line.strip_prefix("arg:")
+        && let Some((clean_name, rest)) = arg.trim().split_once(" - ")
+    {
+        let (name, description, config) = parse_argument(clean_name, rest);
+        return Some(LineType::Positional(name, description, config));
     }
 
     None
@@ -186,12 +186,12 @@ fn extract_annotations(description: &str) -> (String, Vec<String>) {
     let mut annotations: Vec<String> = Vec::new();
     let mut desc = description.to_string();
 
-    if let Some(start) = description.find('[') {
-        if let Some(end) = description[start..].find(']') {
-            let a = description[start + 1..start + end].to_string();
-            annotations = a.split(',').map(|s| s.trim().to_string()).collect();
-            desc = description[..start].trim().to_string();
-        }
+    if let Some(start) = description.find('[')
+        && let Some(end) = description[start..].find(']')
+    {
+        let a = description[start + 1..start + end].to_string();
+        annotations = a.split(',').map(|s| s.trim().to_string()).collect();
+        desc = description[..start].trim().to_string();
     }
 
     (desc, annotations)

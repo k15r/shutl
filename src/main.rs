@@ -130,11 +130,11 @@ fn handle_new(new_matches: &ArgMatches) {
     script_path.push(&script_name);
 
     // Ensure parent directories exist
-    if let Some(parent) = script_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("Failed to create directory {}: {}", parent.display(), e);
-            std::process::exit(1);
-        }
+    if let Some(parent) = script_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("Failed to create directory {}: {}", parent.display(), e);
+        std::process::exit(1);
     }
 
     let shebang = match script_type {
