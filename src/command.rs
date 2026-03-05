@@ -411,12 +411,16 @@ pub fn build_edit_command() -> Command {
 
 /// Builds the 'list' subcommand for listing available scripts
 pub fn build_list_command() -> Command {
+    let scripts_dir = get_scripts_dir();
     Command::new("list")
         .about("List available scripts")
         .arg(
             Arg::new("subdirectory")
                 .help("Only list scripts under this subdirectory")
-                .required(false),
+                .required(false)
+                .add(ArgValueCompleter::new(
+                    PathCompleter::dir().current_dir(scripts_dir),
+                )),
         )
         .arg(
             Arg::new("tree")
@@ -435,6 +439,8 @@ pub struct ListEntry {
 /// Lists all scripts in the given directory, optionally filtered to a subdirectory.
 /// Returns a formatted string ready for display.
 pub fn list_scripts(base_dir: &Path, subdir_filter: Option<&str>, tree: bool) -> String {
+    let normalized: Option<PathBuf> = subdir_filter.map(|s| Path::new(s).components().collect());
+    let subdir_filter = normalized.as_deref().and_then(|p| p.to_str());
     let search_dir = if let Some(subdir) = subdir_filter {
         let p = base_dir.join(subdir);
         if !p.is_dir() {
@@ -1485,5 +1491,23 @@ mod tests {
 
         let output = list_scripts(scripts_dir, Some("nonexistent"), false);
         assert_eq!(output, "Directory not found: nonexistent");
+    }
+
+    #[test]
+    fn test_list_scripts_trailing_slash() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build image",
+        );
+
+        let output = list_scripts(scripts_dir, Some("docker/"), false);
+        assert!(output.contains("docker/build"));
+        assert!(!output.contains("docker//build"));
     }
 }
