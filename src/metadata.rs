@@ -27,7 +27,7 @@ pub enum ArgType {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompleteOptions {
     pub path: PathBuf,
-    pub extensions: Vec<String>,
+    pub env_var: Option<String>,
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -41,31 +41,27 @@ pub struct Config {
 
 pub fn parse_command_metadata(path: &Path) -> CommandMetadata {
     let mut metadata = CommandMetadata::default();
-    let comment_prefix = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("js") => "//@",
-        _ => "#@",
-    };
 
     if let Ok(contents) = fs::read_to_string(path) {
-        let lines = contents.lines().collect::<Vec<_>>();
-        let mut i = if lines.first().is_some_and(|line| line.starts_with("#!")) {
-            1
-        } else {
-            0
-        };
-
-        while i < lines.len() && lines[i].starts_with(comment_prefix) {
-            let line = lines[i].trim_start_matches(comment_prefix).trim();
-            let parsed_line = parse_line(line);
-            if let Some(parsed) = parsed_line {
-                match parsed {
-                    LineType::Description(desc) => metadata.description = desc,
-                    _ => {
-                        metadata.arguments.push(parsed);
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("#!") {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("#@") {
+                if let Some(parsed) = parse_line(rest.trim()) {
+                    match parsed {
+                        LineType::Description(desc) => metadata.description = desc,
+                        _ => metadata.arguments.push(parsed),
                     }
                 }
+            } else if trimmed.starts_with('#') {
+                // Regular comment — skip but keep parsing
+                continue;
+            } else {
+                // First non-comment line — stop parsing
+                break;
             }
-            i += 1;
         }
     }
 
@@ -77,18 +73,18 @@ fn parse_line(line: &str) -> Option<LineType> {
         return Some(LineType::Description(description.trim().to_string()));
     }
 
-    if let Some(flag) = line.strip_prefix("flag:") {
-        if let Some((clean_name, rest)) = flag.trim().split_once(" - ") {
-            let (name, description, config) = parse_argument(clean_name, rest);
-            return Some(LineType::Flag(name, description, config));
-        }
+    if let Some(flag) = line.strip_prefix("flag:")
+        && let Some((clean_name, rest)) = flag.trim().split_once(" - ")
+    {
+        let (name, description, config) = parse_argument(clean_name, rest);
+        return Some(LineType::Flag(name, description, config));
     }
 
-    if let Some(arg) = line.strip_prefix("arg:") {
-        if let Some((clean_name, rest)) = arg.trim().split_once(" - ") {
-            let (name, description, config) = parse_argument(clean_name, rest);
-            return Some(LineType::Positional(name, description, config));
-        }
+    if let Some(arg) = line.strip_prefix("arg:")
+        && let Some((clean_name, rest)) = arg.trim().split_once(" - ")
+    {
+        let (name, description, config) = parse_argument(clean_name, rest);
+        return Some(LineType::Positional(name, description, config));
     }
 
     None
@@ -144,10 +140,11 @@ fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
                 };
                 cfg.arg_type = Some(arg_type);
                 if !value.trim().is_empty() {
-                    cfg.complete_options = Some(CompleteOptions {
-                        path: PathBuf::from(value.trim()),
-                        extensions: Vec::new(),
-                    });
+                    // Parse format: [file:default_path:ENV_VAR] or [file:default_path]
+                    let parts: Vec<&str> = value.trim().splitn(2, ':').collect();
+                    let path = PathBuf::from(parts[0].trim());
+                    let env_var = parts.get(1).map(|s| s.trim().to_string());
+                    cfg.complete_options = Some(CompleteOptions { path, env_var });
                 }
             }
             "options" => {
@@ -173,6 +170,15 @@ fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
             _ => {}
         }
     }
+
+    // Warn if both required and default are set (contradictory)
+    if cfg.required && cfg.default.is_some() {
+        log::warn!(
+            "Argument has both 'required' and 'default' set - 'required' will be ignored"
+        );
+        cfg.required = false;
+    }
+
     Some(cfg)
 }
 
@@ -180,12 +186,12 @@ fn extract_annotations(description: &str) -> (String, Vec<String>) {
     let mut annotations: Vec<String> = Vec::new();
     let mut desc = description.to_string();
 
-    if let Some(start) = description.find('[') {
-        if let Some(end) = description[start..].find(']') {
-            let a = description[start + 1..start + end].to_string();
-            annotations = a.split(',').map(|s| s.trim().to_string()).collect();
-            desc = description[..start].trim().to_string();
-        }
+    if let Some(start) = description.find('[')
+        && let Some(end) = description[start..].find(']')
+    {
+        let a = description[start + 1..start + end].to_string();
+        annotations = a.split(',').map(|s| s.trim().to_string()).collect();
+        desc = description[..start].trim().to_string();
     }
 
     (desc, annotations)
@@ -304,7 +310,7 @@ mod tests {
             )
         );
 
-        // Test output-dir flag
+        // Test output-dir flag (required is ignored because default is set)
         let output_dir_flag = &metadata.arguments[5];
         assert_eq!(
             output_dir_flag,
@@ -314,7 +320,7 @@ mod tests {
                 Config {
                     default: Some("./output".to_string()),
                     arg_type: Some(ArgType::Dir),
-                    required: true,
+                    required: false, // required is ignored when default is set
                     ..Default::default()
                 }
             )
@@ -341,6 +347,198 @@ mod tests {
             &LineType::Flag(
                 "debug".to_string(),
                 "Enable debug mode".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Bool),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_required_with_default_ignored() {
+        // When both required and default are set, required should be ignored
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:test-flag - Test flag [required,default:value]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "test-flag".to_string(),
+                "Test flag".to_string(),
+                Config {
+                    default: Some("value".to_string()),
+                    required: false, // should be false because default is set
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_file_with_start_directory() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:input - Input file [file:~/Documents]
+#@arg:config - Config file [file:/etc]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        // Test flag with file and start directory
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("~/Documents"),
+                        env_var: None,
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+
+        // Test arg with file and start directory
+        let arg = &metadata.arguments[1];
+        assert_eq!(
+            arg,
+            &LineType::Positional(
+                "config".to_string(),
+                "Config file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("/etc"),
+                        env_var: None,
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_file_with_env_var_override() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@flag:input - Input file [file:~/Documents:INPUT_DIR]
+#@arg:config - Config file [dir:/etc:CONFIG_DIR]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        // Test flag with file, start directory, and env var
+        let flag = &metadata.arguments[0];
+        assert_eq!(
+            flag,
+            &LineType::Flag(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::File),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("~/Documents"),
+                        env_var: Some("INPUT_DIR".to_string()),
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+
+        // Test arg with dir, start directory, and env var
+        let arg = &metadata.arguments[1];
+        assert_eq!(
+            arg,
+            &LineType::Positional(
+                "config".to_string(),
+                "Config file".to_string(),
+                Config {
+                    arg_type: Some(ArgType::Dir),
+                    complete_options: Some(CompleteOptions {
+                        path: PathBuf::from("/etc"),
+                        env_var: Some("CONFIG_DIR".to_string()),
+                    }),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_metadata_stops_at_code() {
+        // Metadata after a non-comment line should be ignored
+        let script_content = r#"#!/bin/bash
+#@description: My tool
+#@arg:input - Input file
+
+echo "some code"
+
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.description, "My tool");
+        assert_eq!(metadata.arguments.len(), 1);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config::default()
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_metadata_skips_blank_lines_and_comments() {
+        // Blank lines and regular comments within the header block should be skipped
+        let script_content = r#"#!/bin/bash
+#@description: My tool
+
+# This is a regular comment
+#@arg:input - Input file
+
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.description, "My tool");
+        assert_eq!(metadata.arguments.len(), 2);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "input".to_string(),
+                "Input file".to_string(),
+                Config::default()
+            )
+        );
+        assert_eq!(
+            metadata.arguments[1],
+            LineType::Flag(
+                "verbose".to_string(),
+                "Enable verbose output".to_string(),
                 Config {
                     arg_type: Some(ArgType::Bool),
                     ..Default::default()

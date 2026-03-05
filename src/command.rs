@@ -1,7 +1,7 @@
 use crate::get_scripts_dir;
-use crate::metadata::{ArgType, LineType, parse_command_metadata};
+use crate::metadata::{ArgType, Config, LineType, parse_command_metadata};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version};
-use clap_complete::{ArgValueCompleter, PathCompleter};
+use clap_complete::{ArgValueCompleter, CompletionCandidate, PathCompleter};
 use is_executable::IsExecutable;
 use shellexpand;
 use std::collections::HashMap;
@@ -12,6 +12,62 @@ use std::path::{Path, PathBuf};
 pub struct CommandWithPath {
     pub command: Command,
     pub file_path: std::path::PathBuf,
+}
+
+/// Resolves the completion start directory from complete options.
+/// Checks env var first, then falls back to the default path.
+fn resolve_completion_dir(complete_options: &crate::metadata::CompleteOptions) -> Option<PathBuf> {
+    // Check env var override first
+    if let Some(ref env_var) = complete_options.env_var
+        && let Ok(env_value) = std::env::var(env_var)
+        && let Ok(expanded) = shellexpand::full(&env_value)
+    {
+        return Some(PathBuf::from(expanded.to_string()));
+    }
+
+    // Fall back to default path
+    if let Some(path_str) = complete_options.path.to_str()
+        && !path_str.is_empty()
+        && let Ok(expanded) = shellexpand::full(path_str)
+    {
+        return Some(PathBuf::from(expanded.to_string()));
+    }
+
+    None
+}
+
+/// Adds a path completer to an argument based on its config
+fn add_path_completer(arg: Arg, cfg: &Config) -> Arg {
+    match &cfg.arg_type {
+        Some(ArgType::Dir) => {
+            let mut pc = PathCompleter::dir();
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        Some(ArgType::File) => {
+            let mut pc = PathCompleter::file();
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        Some(ArgType::Path) => {
+            let mut pc = PathCompleter::any();
+            if let Some(ref complete_options) = cfg.complete_options
+                && let Some(dir) = resolve_completion_dir(complete_options)
+            {
+                pc = pc.current_dir(dir);
+            }
+            arg.add(ArgValueCompleter::new(pc))
+        }
+        _ => arg,
+    }
 }
 
 /// Builds a command for a script file
@@ -41,12 +97,11 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     }
 
     for cmdarg in &metadata.arguments {
-        // Check if the argument is a positional argument
         match cmdarg {
             LineType::Positional(name, description, cfg) => {
                 let mut arg = Arg::new(name).help(description);
-                arg = if let Some(default_value) = cfg.clone().default {
-                    arg.default_value(default_value)
+                arg = if let Some(ref default_value) = cfg.default {
+                    arg.default_value(default_value.clone())
                 } else {
                     arg.required(true)
                 };
@@ -54,65 +109,34 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                     arg = arg.value_parser(clap::builder::PossibleValuesParser::new(&cfg.options))
                 }
 
-                match cfg.arg_type {
-                    Some(ArgType::CatchAll) => {
-                        arg = arg.num_args(1..).action(clap::ArgAction::Append);
-                        arg = arg.required(false);
-                    }
-                    Some(ArgType::Dir) => {
-                        let mut pc = PathCompleter::dir();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::File) => {
-                        let mut pc = PathCompleter::file();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::Path) => {
-                        let mut pc = PathCompleter::any();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    _ => {}
+                if let Some(ArgType::CatchAll) = cfg.arg_type {
+                    arg = arg.num_args(1..).action(clap::ArgAction::Append);
+                    arg = arg.required(false);
+                } else {
+                    arg = add_path_completer(arg, cfg);
                 }
 
                 cmd = cmd.arg(arg);
             }
 
             LineType::Flag(name, description, cfg) => {
-                // Skip flags for now
                 let mut arg = Arg::new(name).help(description).long(name);
 
                 if let Some(ArgType::Bool) = cfg.arg_type {
-                    arg = arg.action(clap::ArgAction::SetTrue);
+                    let negated_name = format!("no-{}", name);
+                    arg = arg
+                        .action(clap::ArgAction::SetTrue)
+                        .conflicts_with(&negated_name);
                     cmd = cmd.arg(
-                        Arg::new(format!("no-{}", name))
+                        Arg::new(&negated_name)
                             .help(format!("Disable the '{}' flag", name))
-                            .long(format!("no-{}", name))
-                            .action(clap::ArgAction::SetTrue),
+                            .long(&negated_name)
+                            .action(clap::ArgAction::SetTrue)
+                            .conflicts_with(name),
                     );
                 } else {
-                    if cfg.default.is_some() {
-                        arg = arg.default_value(cfg.default.clone().unwrap());
+                    if let Some(ref default) = cfg.default {
+                        arg = arg.default_value(default.clone());
                     }
                     if !cfg.options.is_empty() {
                         arg = arg
@@ -124,42 +148,7 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
                     arg = arg.required(true);
                 }
 
-                match &cfg.arg_type {
-                    Some(ArgType::Dir) => {
-                        let mut pc = PathCompleter::dir();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::File) => {
-                        let mut pc = PathCompleter::file();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    Some(ArgType::Path) => {
-                        let mut pc = PathCompleter::any();
-                        if cfg.complete_options.is_some() {
-                            let complete_options = cfg.complete_options.clone().unwrap_or_default();
-                            let dir =
-                                shellexpand::full(complete_options.path.to_str().unwrap()).unwrap();
-
-                            pc = pc.current_dir(PathBuf::from(dir.to_string()));
-                        }
-                        arg = arg.add(ArgValueCompleter::new(pc));
-                    }
-                    _ => {}
-                }
+                arg = add_path_completer(arg, cfg);
                 cmd = cmd.arg(arg);
             }
             _ => unreachable!(),
@@ -173,21 +162,20 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
 }
 
 /// Builds a list of commands from a directory
-pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<CommandWithPath> {
+pub fn build_command_tree(dir_path: &Path, active_args: &[String]) -> Vec<CommandWithPath> {
     log::debug!(
         "build_command_tree: dir_path {:?}, active_args: {:?}",
         dir_path,
         active_args
     );
     let mut commands = Vec::new();
-    let mut active_args = active_args.clone();
     let first_arg = active_args.first().cloned().unwrap_or_default();
-    active_args = active_args.into_iter().skip(1).collect();
+    let rest = if active_args.is_empty() { &[] } else { &active_args[1..] };
 
     log::debug!(
         "build_command_tree: First arg: {:?}, active_args(rest): {:?}",
         first_arg,
-        active_args
+        rest
     );
 
     if first_arg.is_empty() {
@@ -206,7 +194,7 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         let dir_cmd = add_dir_subcommands(
             dir_command(&first_arg_path, &dir_name),
             &first_arg_path,
-            &active_args,
+            rest,
         );
         commands.push(CommandWithPath {
             command: dir_cmd,
@@ -215,19 +203,18 @@ pub fn build_command_tree(dir_path: &Path, active_args: &Vec<String>) -> Vec<Com
         return commands;
     }
 
-    let (is_script, script_path) = is_script_file(dir_path, &first_arg);
-    if is_script {
+    if let Some(script_path) = find_script_file(dir_path, &first_arg) {
         commands.push(build_script_command(first_arg, &script_path));
         return commands;
     }
 
-    build_command_tree(dir_path, &active_args)
+    build_command_tree(dir_path, rest)
 }
 
 fn add_dir_subcommands(
     mut dir_cmd: Command,
     first_arg_path: &Path,
-    active_args: &Vec<String>,
+    active_args: &[String],
 ) -> Command {
     for subcmd in build_command_tree(first_arg_path, active_args) {
         log::debug!(
@@ -302,10 +289,10 @@ fn commands_for_dir(dir: &Path) -> Vec<CommandWithPath> {
     commands
 }
 
-fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
+fn find_script_file(dir_path: &Path, name: &str) -> Option<PathBuf> {
     let script_path = dir_path.join(name);
     if script_path.is_file() && script_path.is_executable() {
-        return (true, script_path);
+        return Some(script_path);
     }
 
     if let Ok(entries) = fs::read_dir(dir_path) {
@@ -313,12 +300,15 @@ fn is_script_file(dir_path: &Path, name: &str) -> (bool, PathBuf) {
             let path = entry.path();
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
             if path.is_file() && filename.rsplitn(2, ".").last().unwrap_or(&filename) == name {
-                return (path.is_executable(), path);
+                if path.is_executable() {
+                    return Some(path);
+                }
+                return None;
             }
         }
     }
 
-    (false, PathBuf::new())
+    None
 }
 
 /// Builds the complete CLI command structure
@@ -342,11 +332,310 @@ pub fn build_cli_command() -> Command {
         .author(crate_authors!())
         .disable_help_subcommand(true);
 
+    // Add built-in commands
+    cli = cli
+        .subcommand(build_new_command())
+        .subcommand(build_edit_command())
+        .subcommand(build_list_command());
+
     for cmd_with_path in build_command_tree(&get_scripts_dir(), &active_args) {
         cli = cli.subcommand(cmd_with_path.command);
     }
 
     cli
+}
+
+/// Builds the 'new' subcommand for creating new scripts
+pub fn build_new_command() -> Command {
+    let scripts_dir = get_scripts_dir();
+    Command::new("new")
+        .about("Create a new script")
+        .arg(
+            Arg::new("location")
+                .help("Location to create the script (relative to ~/.shutl)")
+                .default_value("")
+                .required(true)
+                .add(ArgValueCompleter::new(
+                    PathCompleter::dir().current_dir(scripts_dir),
+                )),
+        )
+        .arg(
+            Arg::new("name")
+                .help("Name of the script (without .sh extension)")
+                .required(true),
+        )
+        .arg(
+            Arg::new("editor")
+                .help("Editor to use (defaults to $EDITOR or 'vim')")
+                .long("editor")
+                .short('e'),
+        )
+        .arg(
+            Arg::new("type")
+                .help("Shell type for the script")
+                .long("type")
+                .short('t')
+                .value_parser(clap::builder::PossibleValuesParser::new(vec![
+                    "zsh", "bash",
+                ]))
+                .default_value("zsh"),
+        )
+        .arg(
+            Arg::new("no-edit")
+                .help("Don't open the script in an editor")
+                .long("no-edit")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
+
+/// Builds the 'edit' subcommand for editing existing scripts
+pub fn build_edit_command() -> Command {
+    Command::new("edit")
+        .about("Edit an existing script")
+        .arg(
+            Arg::new("command")
+                .help("Command path components (e.g., 'subdir myscript')")
+                .required(true)
+                .num_args(1..)
+                .add(ArgValueCompleter::new(complete_script_names)),
+        )
+        .arg(
+            Arg::new("editor")
+                .help("Editor to use (defaults to $EDITOR or 'vim')")
+                .long("editor")
+                .short('e'),
+        )
+}
+
+/// Builds the 'list' subcommand for listing available scripts
+pub fn build_list_command() -> Command {
+    let scripts_dir = get_scripts_dir();
+    Command::new("list")
+        .about("List available scripts")
+        .arg(
+            Arg::new("subdirectory")
+                .help("Only list scripts under this subdirectory")
+                .required(false)
+                .add(ArgValueCompleter::new(
+                    PathCompleter::dir().current_dir(scripts_dir),
+                )),
+        )
+        .arg(
+            Arg::new("tree")
+                .help("Show hierarchical tree view")
+                .long("tree")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
+
+/// An entry representing a script found during listing
+pub struct ListEntry {
+    pub path: String,
+    pub description: String,
+}
+
+/// Lists all scripts in the given directory, optionally filtered to a subdirectory.
+/// Returns a formatted string ready for display.
+pub fn list_scripts(base_dir: &Path, subdir_filter: Option<&str>, tree: bool) -> String {
+    let normalized: Option<PathBuf> = subdir_filter.map(|s| Path::new(s).components().collect());
+    let subdir_filter = normalized.as_deref().and_then(|p| p.to_str());
+    let search_dir = if let Some(subdir) = subdir_filter {
+        let p = base_dir.join(subdir);
+        if !p.is_dir() {
+            return format!("Directory not found: {}", subdir);
+        }
+        p
+    } else {
+        base_dir.to_path_buf()
+    };
+
+    let prefix = subdir_filter.unwrap_or("");
+    let mut entries = Vec::new();
+    collect_scripts(&search_dir, prefix, &mut entries);
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    if entries.is_empty() {
+        return "No scripts found.".to_string();
+    }
+
+    if tree {
+        format_tree(&entries)
+    } else {
+        format_flat(&entries)
+    }
+}
+
+fn collect_scripts(dir: &Path, prefix: &str, entries: &mut Vec<ListEntry>) {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+
+    let (mut directories, mut files): (Vec<_>, Vec<_>) = read_dir
+        .filter_map(Result::ok)
+        .partition(|entry| entry.path().is_dir());
+
+    directories.retain(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
+    directories.sort_by_key(|e| e.file_name());
+    files.retain(|entry| {
+        !entry.file_name().to_string_lossy().starts_with('.')
+            && entry.path().is_file()
+            && entry.path().is_executable()
+    });
+    files.sort_by_key(|e| e.file_name());
+
+    for entry in &files {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let clean_name = name.rsplitn(2, '.').last().unwrap_or(&name).to_string();
+        let metadata = parse_command_metadata(&entry.path());
+        let path = if prefix.is_empty() {
+            clean_name
+        } else {
+            format!("{}/{}", prefix, clean_name)
+        };
+        entries.push(ListEntry {
+            path,
+            description: metadata.description,
+        });
+    }
+
+    for entry in &directories {
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let sub_prefix = if prefix.is_empty() {
+            dir_name.clone()
+        } else {
+            format!("{}/{}", prefix, dir_name)
+        };
+        collect_scripts(&entry.path(), &sub_prefix, entries);
+    }
+}
+
+fn format_flat(entries: &[ListEntry]) -> String {
+    let max_path_len = entries.iter().map(|e| e.path.len()).max().unwrap_or(0);
+    entries
+        .iter()
+        .map(|e| {
+            if e.description.is_empty() {
+                e.path.clone()
+            } else {
+                format!("{:<width$}  {}", e.path, e.description, width = max_path_len)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_tree(entries: &[ListEntry]) -> String {
+    let mut lines = Vec::new();
+    let mut current_dir: Option<String> = None;
+    let max_name_len = entries
+        .iter()
+        .map(|e| {
+            e.path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&e.path)
+                .len()
+        })
+        .max()
+        .unwrap_or(0);
+
+    for entry in entries {
+        if let Some(slash_pos) = entry.path.rfind('/') {
+            let dir = &entry.path[..slash_pos];
+            let name = &entry.path[slash_pos + 1..];
+            if current_dir.as_deref() != Some(dir) {
+                lines.push(format!("{}/", dir));
+                current_dir = Some(dir.to_string());
+            }
+            if entry.description.is_empty() {
+                lines.push(format!("  {}", name));
+            } else {
+                lines.push(format!(
+                    "  {:<width$}  {}",
+                    name,
+                    entry.description,
+                    width = max_name_len
+                ));
+            }
+        } else {
+            current_dir = None;
+            if entry.description.is_empty() {
+                lines.push(entry.path.clone());
+            } else {
+                lines.push(format!(
+                    "{:<width$}  {}",
+                    entry.path,
+                    entry.description,
+                    width = max_name_len
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Completer for script names in the edit command
+fn complete_script_names(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    complete_script_names_in_dir(current, &get_scripts_dir())
+}
+
+/// Completer for script names in a given directory (testable version)
+fn complete_script_names_in_dir(current: &std::ffi::OsStr, base_dir: &Path) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let parts: Vec<&str> = current_str.split('/').collect();
+
+    // Build the path to search in
+    let mut search_dir = base_dir.to_path_buf();
+    if parts.len() > 1 {
+        for part in &parts[..parts.len() - 1] {
+            search_dir.push(part);
+        }
+    }
+
+    let prefix = parts.last().unwrap_or(&"");
+    let path_prefix = if parts.len() > 1 {
+        parts[..parts.len() - 1].join("/") + "/"
+    } else {
+        String::new()
+    };
+
+    let mut completions = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&search_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+
+            // Skip hidden files
+            if name_str.starts_with('.') {
+                continue;
+            }
+
+            let path = entry.path();
+
+            if path.is_dir() {
+                // Directory - add with trailing slash to indicate more completions
+                if name_str.starts_with(prefix) {
+                    completions.push(CompletionCandidate::new(format!(
+                        "{}{}/",
+                        path_prefix, name_str
+                    )));
+                }
+            } else if path.is_file() && path.is_executable() {
+                // Executable file - strip extension for completion
+                let clean_name = name_str.rsplitn(2, '.').last().unwrap_or(&name_str);
+                if clean_name.starts_with(prefix) {
+                    completions.push(CompletionCandidate::new(format!(
+                        "{}{}",
+                        path_prefix, clean_name
+                    )));
+                }
+            }
+        }
+    }
+
+    completions
 }
 
 #[cfg(test)]
@@ -529,7 +818,7 @@ mod tests {
     }
 
     fn validate_arg(
-        args: &Vec<&Arg>,
+        args: &[&Arg],
         name: &str,
         description: &str,
         is_required: bool,
@@ -606,6 +895,28 @@ mod tests {
     }
 
     #[test]
+    fn test_bool_flag_conflicts() {
+        let script_content = r#"#!/bin/bash
+#@description: Test command
+#@flag:verbose - Enable verbose output [bool]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        // Test that using both --verbose and --no-verbose results in an error
+        let result = cmd_with_path
+            .command
+            .clone()
+            .try_get_matches_from(vec!["test", "--verbose", "--no-verbose"]);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn test_build_command_tree_for_subfolder() {
         let dir = tempdir().unwrap();
         let scripts_dir = dir.path().join(".shutl");
@@ -639,7 +950,7 @@ mod tests {
             "#!/bin/bash\n#@description: subdir script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec!["subdir".to_string()]);
+        let commands = build_command_tree(&scripts_dir, &["subdir".to_string()]);
 
         // Test root level command
         assert_eq!(commands.len(), 1); // root.sh and subdir
@@ -689,7 +1000,7 @@ mod tests {
         );
         create_test_script(&subdir, "sub.sh", "#!/bin/bash\n#@description: Sub script");
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Test root level command
         assert_eq!(commands.len(), 2); // root.sh and subdir
@@ -732,7 +1043,7 @@ mod tests {
             "#!/bin/bash\n#@description: Test script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec!["test_dir".to_string()]);
+        let commands = build_command_tree(&scripts_dir, &["test_dir".to_string()]);
 
         // Test directory command
         assert_eq!(commands.len(), 1); // only the directory command
@@ -770,7 +1081,7 @@ mod tests {
             "#!/bin/bash\n#@description: Hidden script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Test that only visible items are included
         assert_eq!(commands.len(), 2); // visible.sh and visible directory
@@ -863,7 +1174,7 @@ mod tests {
             "#!/bin/bash\n#@description: Test script in subdirectory",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Verify both commands exist with different names
         assert_eq!(commands.len(), 2);
@@ -894,7 +1205,7 @@ mod tests {
             "#!/bin/bash\n#@description: Second test script",
         );
 
-        let commands = build_command_tree(&scripts_dir, &vec![]);
+        let commands = build_command_tree(&scripts_dir, &[]);
 
         // Verify both commands exist with different names
         assert_eq!(commands.len(), 2);
@@ -977,5 +1288,224 @@ mod tests {
         // Test non-existent script in existing directory
         let components = vec!["subdir".to_string(), "nonexistent".to_string()];
         assert!(find_script_file_in_dir(&components, &scripts_dir).is_none());
+    }
+
+    #[test]
+    fn test_complete_script_names_root_level() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create test scripts and directories
+        create_test_script(scripts_dir, "script1.sh", "#!/bin/bash");
+        create_test_script(scripts_dir, "script2.sh", "#!/bin/bash");
+        create_test_script(scripts_dir, "other.py", "#!/usr/bin/env python3");
+        fs::create_dir(scripts_dir.join("subdir")).unwrap();
+
+        // Create a hidden file that should be ignored
+        let hidden_path = scripts_dir.join(".hidden.sh");
+        fs::write(&hidden_path, "#!/bin/bash").unwrap();
+        fs::set_permissions(&hidden_path, PermissionsExt::from_mode(0o755)).unwrap();
+
+        // Test empty prefix - should return all scripts and directories
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new(""), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"script1".to_string()));
+        assert!(names.contains(&"script2".to_string()));
+        assert!(names.contains(&"other".to_string()));
+        assert!(names.contains(&"subdir/".to_string()));
+        assert!(!names.iter().any(|n| n.contains(".hidden")));
+
+        // Test prefix filtering
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("script"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"script1".to_string()));
+        assert!(names.contains(&"script2".to_string()));
+        assert!(!names.contains(&"other".to_string()));
+        assert!(!names.contains(&"subdir/".to_string()));
+    }
+
+    #[test]
+    fn test_complete_script_names_nested() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create nested structure
+        let subdir = scripts_dir.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        create_test_script(&subdir, "nested1.sh", "#!/bin/bash");
+        create_test_script(&subdir, "nested2.sh", "#!/bin/bash");
+        fs::create_dir(subdir.join("deeper")).unwrap();
+
+        // Test completion in subdirectory
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"subdir/nested1".to_string()));
+        assert!(names.contains(&"subdir/nested2".to_string()));
+        assert!(names.contains(&"subdir/deeper/".to_string()));
+
+        // Test prefix filtering in subdirectory
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/nested1"), scripts_dir);
+        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+
+        assert!(names.contains(&"subdir/nested1".to_string()));
+        assert!(!names.contains(&"subdir/nested2".to_string()));
+    }
+
+    #[test]
+    fn test_complete_script_names_nonexistent_dir() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Test completion in non-existent directory returns empty
+        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
+        assert!(completions.is_empty());
+    }
+
+    #[test]
+    fn test_list_scripts_flat() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        // Create nested structure
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+        create_test_script(
+            &docker_dir,
+            "push.sh",
+            "#!/bin/bash\n#@description: Push image to registry",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, None, false);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("docker/build"));
+        assert!(lines[0].contains("Build a Docker image"));
+        assert!(lines[1].starts_with("docker/push"));
+        assert!(lines[1].contains("Push image to registry"));
+        assert!(lines[2].starts_with("hello"));
+        assert!(lines[2].contains("Say hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_tree() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+        create_test_script(
+            &docker_dir,
+            "push.sh",
+            "#!/bin/bash\n#@description: Push image to registry",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, None, true);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "docker/");
+        assert!(lines[1].contains("build"));
+        assert!(lines[1].contains("Build a Docker image"));
+        assert!(lines[2].contains("push"));
+        assert!(lines[2].contains("Push image to registry"));
+        assert!(lines[3].contains("hello"));
+        assert!(lines[3].contains("Say hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_filtered() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build a Docker image",
+        );
+
+        let k8s_dir = scripts_dir.join("k8s");
+        fs::create_dir(&k8s_dir).unwrap();
+        create_test_script(
+            &k8s_dir,
+            "deploy.sh",
+            "#!/bin/bash\n#@description: Deploy to Kubernetes",
+        );
+
+        create_test_script(
+            scripts_dir,
+            "hello.sh",
+            "#!/bin/bash\n#@description: Say hello",
+        );
+
+        let output = list_scripts(scripts_dir, Some("docker"), false);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("docker/build"));
+        assert!(lines[0].contains("Build a Docker image"));
+        // k8s and hello should NOT appear
+        assert!(!output.contains("k8s"));
+        assert!(!output.contains("hello"));
+    }
+
+    #[test]
+    fn test_list_scripts_empty() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let output = list_scripts(scripts_dir, None, false);
+        assert_eq!(output, "No scripts found.");
+    }
+
+    #[test]
+    fn test_list_scripts_nonexistent_subdir() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let output = list_scripts(scripts_dir, Some("nonexistent"), false);
+        assert_eq!(output, "Directory not found: nonexistent");
+    }
+
+    #[test]
+    fn test_list_scripts_trailing_slash() {
+        let dir = tempdir().unwrap();
+        let scripts_dir = dir.path();
+
+        let docker_dir = scripts_dir.join("docker");
+        fs::create_dir(&docker_dir).unwrap();
+        create_test_script(
+            &docker_dir,
+            "build.sh",
+            "#!/bin/bash\n#@description: Build image",
+        );
+
+        let output = list_scripts(scripts_dir, Some("docker/"), false);
+        assert!(output.contains("docker/build"));
+        assert!(!output.contains("docker//build"));
     }
 }
