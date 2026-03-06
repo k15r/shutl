@@ -1,0 +1,56 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version:
+    name: Bump Version and Create PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Bump Version
+        id: bump_version
+        run: |
+          current=$(grep '^version' Cargo.toml | cut -d '"' -f 2)
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          new_version="${major}.${minor}.${patch}"
+          sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" Cargo.toml
+          echo "version=${new_version}" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        run: |
+          branch="release-v${{ steps.bump_version.outputs.version }}"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git checkout -b "$branch"
+          git add Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump_version.outputs.version }}"
+          git push origin "$branch"
+          gh pr create \
+            --title "chore: release ${{ steps.bump_version.outputs.version }}" \
+            --body "Bump version to ${{ steps.bump_version.outputs.version }} (${{ inputs.bump }})" \
+            --base main \
+            --head "$branch"
