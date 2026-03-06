@@ -533,9 +533,16 @@ fn format_flat(entries: &[ListEntry]) -> String {
         .join("\n")
 }
 
+use std::io::IsTerminal;
+
+fn use_color() -> bool {
+    std::io::stdout().is_terminal()
+}
+
 fn format_tree(entries: &[ListEntry]) -> String {
     let mut lines = Vec::new();
     let mut printed_dirs: Vec<String> = Vec::new();
+    let color = use_color();
     let max_name_len = entries
         .iter()
         .map(|e| e.path.rsplit('/').next().unwrap_or(&e.path).len())
@@ -554,33 +561,56 @@ fn format_tree(entries: &[ListEntry]) -> String {
                 let ancestor: String = components[..=depth].join("/");
                 if !printed_dirs.contains(&ancestor) {
                     let indent = "  ".repeat(depth);
-                    lines.push(format!("{}{}/", indent, components[depth]));
+                    let dir_label = if color {
+                        format!("\x1b[1;34m{}/\x1b[0m", components[depth])
+                    } else {
+                        format!("{}/", components[depth])
+                    };
+                    lines.push(format!("{}{}", indent, dir_label));
                     printed_dirs.push(ancestor);
                 }
             }
 
             let indent = "  ".repeat(components.len());
-            if entry.description.is_empty() {
-                lines.push(format!("{}* {}", indent, name));
+            let styled_name = if color {
+                format!("\x1b[32m{}\x1b[0m", name)
             } else {
+                name.to_string()
+            };
+            if entry.description.is_empty() {
+                lines.push(format!("{}{}", indent, styled_name));
+            } else {
+                // Pad based on raw name length, then apply color
+                let padding = max_name_len.saturating_sub(name.len());
+                let desc = if color {
+                    format!("\x1b[2m{}\x1b[0m", entry.description)
+                } else {
+                    entry.description.clone()
+                };
                 lines.push(format!(
-                    "{}* {:<width$}  {}",
+                    "{}{}{}  {}",
                     indent,
-                    name,
-                    entry.description,
-                    width = max_name_len
+                    styled_name,
+                    " ".repeat(padding),
+                    desc
                 ));
             }
         } else {
-            if entry.description.is_empty() {
-                lines.push(format!("* {}", entry.path));
+            let styled_name = if color {
+                format!("\x1b[32m{}\x1b[0m", entry.path)
             } else {
-                lines.push(format!(
-                    "* {:<width$}  {}",
-                    entry.path,
-                    entry.description,
-                    width = max_name_len
-                ));
+                entry.path.clone()
+            };
+            if entry.description.is_empty() {
+                lines.push(format!("{}", styled_name));
+            } else {
+                let padding = max_name_len.saturating_sub(entry.path.len());
+                let desc = if color {
+                    format!("\x1b[2m{}\x1b[0m", entry.description)
+                } else {
+                    entry.description.clone()
+                };
+                lines.push(format!("{}{}  {}", styled_name, " ".repeat(padding), desc));
             }
         }
     }
@@ -1473,15 +1503,15 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 7);
         assert_eq!(lines[0], "docker/");
-        assert!(lines[1].starts_with("  * build"));
+        assert!(lines[1].starts_with("  build"));
         assert_eq!(lines[2], "  compose/");
-        assert!(lines[3].starts_with("    * down"));
+        assert!(lines[3].starts_with("    down"));
         assert!(lines[3].contains("Stop services"));
-        assert!(lines[4].starts_with("    * up"));
+        assert!(lines[4].starts_with("    up"));
         assert!(lines[4].contains("Start services"));
-        assert!(lines[5].starts_with("  * push"));
+        assert!(lines[5].starts_with("  push"));
         assert!(lines[5].contains("Push image to registry"));
-        assert!(lines[6].starts_with("* hello"));
+        assert!(lines[6].starts_with("hello"));
         assert!(lines[6].contains("Say hello"));
     }
 
