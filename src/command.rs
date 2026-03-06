@@ -561,10 +561,10 @@ fn format_tree(entries: &[ListEntry]) -> String {
 
             let indent = "  ".repeat(components.len());
             if entry.description.is_empty() {
-                lines.push(format!("{}{}", indent, name));
+                lines.push(format!("{}* {}", indent, name));
             } else {
                 lines.push(format!(
-                    "{}{:<width$}  {}",
+                    "{}* {:<width$}  {}",
                     indent,
                     name,
                     entry.description,
@@ -573,10 +573,10 @@ fn format_tree(entries: &[ListEntry]) -> String {
             }
         } else {
             if entry.description.is_empty() {
-                lines.push(entry.path.clone());
+                lines.push(format!("* {}", entry.path));
             } else {
                 lines.push(format!(
-                    "{:<width$}  {}",
+                    "* {:<width$}  {}",
                     entry.path,
                     entry.description,
                     width = max_name_len
@@ -1473,18 +1473,16 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 7);
         assert_eq!(lines[0], "docker/");
-        assert!(lines[1].starts_with("  build"));
+        assert!(lines[1].starts_with("  * build"));
         assert_eq!(lines[2], "  compose/");
-        assert!(lines[3].starts_with("    down"));
+        assert!(lines[3].starts_with("    * down"));
         assert!(lines[3].contains("Stop services"));
-        assert!(lines[4].starts_with("    up"));
+        assert!(lines[4].starts_with("    * up"));
         assert!(lines[4].contains("Start services"));
-        assert!(lines[5].starts_with("  push"));
+        assert!(lines[5].starts_with("  * push"));
         assert!(lines[5].contains("Push image to registry"));
-        assert!(lines[6].contains("hello"));
+        assert!(lines[6].starts_with("* hello"));
         assert!(lines[6].contains("Say hello"));
-        // hello should not be indented (root level)
-        assert!(!lines[6].starts_with(" "));
     }
 
     #[test]
