@@ -170,7 +170,11 @@ pub fn build_command_tree(dir_path: &Path, active_args: &[String]) -> Vec<Comman
     );
     let mut commands = Vec::new();
     let first_arg = active_args.first().cloned().unwrap_or_default();
-    let rest = if active_args.is_empty() { &[] } else { &active_args[1..] };
+    let rest = if active_args.is_empty() {
+        &[]
+    } else {
+        &active_args[1..]
+    };
 
     log::debug!(
         "build_command_tree: First arg: {:?}, active_args(rest): {:?}",
@@ -517,7 +521,12 @@ fn format_flat(entries: &[ListEntry]) -> String {
             if e.description.is_empty() {
                 e.path.clone()
             } else {
-                format!("{:<width$}  {}", e.path, e.description, width = max_path_len)
+                format!(
+                    "{:<width$}  {}",
+                    e.path,
+                    e.description,
+                    width = max_path_len
+                )
             }
         })
         .collect::<Vec<_>>()
@@ -529,13 +538,7 @@ fn format_tree(entries: &[ListEntry]) -> String {
     let mut current_dir: Option<String> = None;
     let max_name_len = entries
         .iter()
-        .map(|e| {
-            e.path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&e.path)
-                .len()
-        })
+        .map(|e| e.path.rsplit('/').next().unwrap_or(&e.path).len())
         .max()
         .unwrap_or(0);
 
@@ -581,7 +584,10 @@ fn complete_script_names(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> 
 }
 
 /// Completer for script names in a given directory (testable version)
-fn complete_script_names_in_dir(current: &std::ffi::OsStr, base_dir: &Path) -> Vec<CompletionCandidate> {
+fn complete_script_names_in_dir(
+    current: &std::ffi::OsStr,
+    base_dir: &Path,
+) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
     let parts: Vec<&str> = current_str.split('/').collect();
 
@@ -906,10 +912,11 @@ mod tests {
         let cmd_with_path = build_script_command("test".to_string(), &script_path);
 
         // Test that using both --verbose and --no-verbose results in an error
-        let result = cmd_with_path
-            .command
-            .clone()
-            .try_get_matches_from(vec!["test", "--verbose", "--no-verbose"]);
+        let result = cmd_with_path.command.clone().try_get_matches_from(vec![
+            "test",
+            "--verbose",
+            "--no-verbose",
+        ]);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1308,7 +1315,10 @@ mod tests {
 
         // Test empty prefix - should return all scripts and directories
         let completions = complete_script_names_in_dir(std::ffi::OsStr::new(""), scripts_dir);
-        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+        let names: Vec<String> = completions
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().to_string())
+            .collect();
 
         assert!(names.contains(&"script1".to_string()));
         assert!(names.contains(&"script2".to_string()));
@@ -1318,7 +1328,10 @@ mod tests {
 
         // Test prefix filtering
         let completions = complete_script_names_in_dir(std::ffi::OsStr::new("script"), scripts_dir);
-        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+        let names: Vec<String> = completions
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().to_string())
+            .collect();
 
         assert!(names.contains(&"script1".to_string()));
         assert!(names.contains(&"script2".to_string()));
@@ -1339,16 +1352,24 @@ mod tests {
         fs::create_dir(subdir.join("deeper")).unwrap();
 
         // Test completion in subdirectory
-        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/"), scripts_dir);
-        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+        let completions =
+            complete_script_names_in_dir(std::ffi::OsStr::new("subdir/"), scripts_dir);
+        let names: Vec<String> = completions
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().to_string())
+            .collect();
 
         assert!(names.contains(&"subdir/nested1".to_string()));
         assert!(names.contains(&"subdir/nested2".to_string()));
         assert!(names.contains(&"subdir/deeper/".to_string()));
 
         // Test prefix filtering in subdirectory
-        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("subdir/nested1"), scripts_dir);
-        let names: Vec<String> = completions.iter().map(|c| c.get_value().to_string_lossy().to_string()).collect();
+        let completions =
+            complete_script_names_in_dir(std::ffi::OsStr::new("subdir/nested1"), scripts_dir);
+        let names: Vec<String> = completions
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().to_string())
+            .collect();
 
         assert!(names.contains(&"subdir/nested1".to_string()));
         assert!(!names.contains(&"subdir/nested2".to_string()));
@@ -1360,7 +1381,8 @@ mod tests {
         let scripts_dir = dir.path();
 
         // Test completion in non-existent directory returns empty
-        let completions = complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
+        let completions =
+            complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
         assert!(completions.is_empty());
     }
 
