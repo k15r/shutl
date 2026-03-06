@@ -2,6 +2,15 @@ name: Create Release
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,33 +19,68 @@ env:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  create-tag-and-draft-release:
-    name: Create Tag and Draft Release
+  bump-version:
+    name: Bump Version and Create PR
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.get_version.outputs.version }}
+      version: ${{ steps.bump_version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Get Current Version
-        id: get_version
-        run: echo "version=$(grep '^version' Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+      - name: Bump Version
+        id: bump_version
+        run: |
+          current=$(grep '^version' Cargo.toml | cut -d '"' -f 2)
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          new_version="${major}.${minor}.${patch}"
+          sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" Cargo.toml
+          echo "version=${new_version}" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        run: |
+          branch="release-v${{ steps.bump_version.outputs.version }}"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git checkout -b "$branch"
+          git add Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump_version.outputs.version }}"
+          git push origin "$branch"
+          gh pr create \
+            --title "chore: release ${{ steps.bump_version.outputs.version }}" \
+            --body "Bump version to ${{ steps.bump_version.outputs.version }} (${{ inputs.bump }})" \
+            --base main \
+            --head "$branch"
+
+  create-release:
+    name: Create Tag and Draft Release
+    runs-on: ubuntu-latest
+    needs: bump-version
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-v${{ needs.bump-version.outputs.version }}
 
       - name: Tag the Repository
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
-          git push origin "v${{ steps.get_version.outputs.version }}"
+          git tag -a "v${{ needs.bump-version.outputs.version }}" -m "Release v${{ needs.bump-version.outputs.version }}"
+          git push origin "v${{ needs.bump-version.outputs.version }}"
 
       - name: Create GitHub Draft Release
         run: |
-          gh release create v${{ steps.get_version.outputs.version }} \
-            --title "Release v${{ steps.get_version.outputs.version }}" \
+          gh release create v${{ needs.bump-version.outputs.version }} \
+            --title "Release v${{ needs.bump-version.outputs.version }}" \
             --generate-notes \
             --draft \
             --prerelease
@@ -44,7 +88,9 @@ jobs:
   build-and-upload:
     name: Build and Upload Artifacts
     runs-on: ${{ matrix.os }}
-    needs: create-tag-and-draft-release
+    needs:
+      - bump-version
+      - create-release
     strategy:
       matrix:
         include:
@@ -61,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          ref: v${{ needs.bump-version.outputs.version }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -84,7 +130,7 @@ jobs:
 
       - name: Upload Release Artifact
         run: |
-          gh release upload v${{ needs.create-tag-and-draft-release.outputs.version }} \
+          gh release upload v${{ needs.bump-version.outputs.version }} \
           --clobber \
           ${{ github.workspace }}/${{ matrix.target }}.tar.gz
 
@@ -92,11 +138,11 @@ jobs:
     name: Publish Release
     runs-on: ubuntu-latest
     needs:
-    - build-and-upload
-    - create-tag-and-draft-release
+      - build-and-upload
+      - bump-version
     steps:
       - name: Publish Release
         run: |
-          gh release edit v${{ needs.create-tag-and-draft-release.outputs.version }} \
+          gh release edit v${{ needs.bump-version.outputs.version }} \
             --draft=false \
             --prerelease=false
