@@ -173,9 +173,7 @@ fn parse_annotations(annotations: Vec<String>) -> Option<Config> {
 
     // Warn if both required and default are set (contradictory)
     if cfg.required && cfg.default.is_some() {
-        log::warn!(
-            "Argument has both 'required' and 'default' set - 'required' will be ignored"
-        );
+        log::warn!("Argument has both 'required' and 'default' set - 'required' will be ignored");
         cfg.required = false;
     }
 

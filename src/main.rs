@@ -1,6 +1,6 @@
 use clap::ArgMatches;
-use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir, resolve_editor};
 use shutl::command::list_scripts;
+use shutl::{build_cli_command, execute_script, find_script_file, get_scripts_dir, resolve_editor};
 use std::process::Command;
 
 fn main() {
@@ -66,7 +66,9 @@ fn execute_command(command: &str, sub_m: &ArgMatches) {
 }
 
 fn handle_list(list_matches: &ArgMatches) {
-    let subdir = list_matches.get_one::<String>("subdirectory").map(|s| s.as_str());
+    let subdir = list_matches
+        .get_one::<String>("subdirectory")
+        .map(|s| s.as_str());
     let tree = list_matches.get_flag("tree");
     let output = list_scripts(&get_scripts_dir(), subdir, tree);
     println!("{}", output);
@@ -159,7 +161,11 @@ fn handle_new(new_matches: &ArgMatches) {
         &script_path,
         std::os::unix::fs::PermissionsExt::from_mode(0o755),
     ) {
-        eprintln!("Failed to set permissions on {}: {}", script_path.display(), e);
+        eprintln!(
+            "Failed to set permissions on {}: {}",
+            script_path.display(),
+            e
+        );
         std::process::exit(1);
     }
 
