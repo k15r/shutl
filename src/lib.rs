@@ -5,6 +5,7 @@ pub mod builtin;
 pub mod command;
 pub mod metadata;
 pub mod script;
+pub mod validation;
 
 pub use command::build_cli_command;
 pub use metadata::CommandMetadata;

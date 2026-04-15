@@ -10,7 +10,11 @@ cargo build --release    # Build release version
 cargo test               # Run all tests
 cargo test test_name     # Run a single test by name
 cargo run                # Run the CLI tool
+cargo fmt                # Format code
+cargo clippy             # Lint code
 ```
+
+**Important:** Always run `cargo fmt` and `cargo clippy` after making changes and fix any issues before finishing.
 
 ## Architecture
 

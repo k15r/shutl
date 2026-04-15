@@ -70,6 +70,11 @@ fn add_path_completer(arg: Arg, cfg: &Config) -> Arg {
     }
 }
 
+/// Builds a clap Command for a script, useful for rendering help output during validation.
+pub fn build_script_command_for_help(name: String, path: &Path) -> Command {
+    build_script_command(name, path).command
+}
+
 /// Builds a command for a script file
 fn build_script_command(name: String, path: &Path) -> CommandWithPath {
     let metadata = parse_command_metadata(path);
@@ -344,7 +349,8 @@ pub fn build_cli_command() -> Command {
     cli = cli
         .subcommand(build_new_command())
         .subcommand(build_edit_command())
-        .subcommand(build_list_command());
+        .subcommand(build_list_command())
+        .subcommand(build_validate_command());
 
     for cmd_with_path in build_command_tree(&get_scripts_dir(), &active_args) {
         cli = cli.subcommand(cmd_with_path.command);
@@ -412,6 +418,19 @@ pub fn build_edit_command() -> Command {
                 .help("Editor to use (defaults to $EDITOR or 'vim')")
                 .long("editor")
                 .short('e'),
+        )
+}
+
+/// Builds the 'validate' subcommand for validating script metadata
+pub fn build_validate_command() -> Command {
+    Command::new("validate")
+        .about("Validate a script's metadata configuration")
+        .arg(
+            Arg::new("command")
+                .help("Command path components (e.g., 'subdir myscript')")
+                .required(true)
+                .num_args(1..)
+                .add(ArgValueCompleter::new(complete_script_names)),
         )
 }
 
