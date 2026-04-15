@@ -606,7 +606,7 @@ fn format_tree(entries: &[ListEntry]) -> String {
                 entry.path.clone()
             };
             if entry.description.is_empty() {
-                lines.push(format!("{}", styled_name));
+                lines.push(styled_name.to_string());
             } else {
                 let padding = max_name_len.saturating_sub(entry.path.len());
                 let desc = if color {
