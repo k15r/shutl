@@ -1,6 +1,7 @@
 use dirs::home_dir;
 use std::path::PathBuf;
 
+pub mod builtin;
 pub mod command;
 pub mod metadata;
 pub mod script;
