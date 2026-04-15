@@ -49,7 +49,7 @@ Create shell scripts in the `~/.shutl` directory with metadata comments:
 #@arg:output - Output file path [default:output.txt]
 #@flag:host - Host name [default:localhost]
 #@flag:dry-run - Perform a dry run [bool,default:false]
-#@arg:... - Additional arguments
+#@arg:...files - Additional files to process
 
 # Your script logic here
 if [ "$SHUTL_DRY_RUN" = "true" ]; then
@@ -61,9 +61,9 @@ echo "Hostname: ${SHUTL_HOST}"
 echo "Processing input file: $SHUTL_INPUT"
 echo "Output will be saved to: $SHUTL_OUTPUT"
 
-# Handle additional arguments
-if [ "$#" -gt 0 ]; then
-  echo "Additional arguments: $SHUTL_ADDITIONAL_ARGS"
+# Handle additional files
+if [ -n "$SHUTL_FILES" ]; then
+  echo "Additional files: $SHUTL_FILES"
 fi
 ```
 
@@ -89,7 +89,11 @@ To enable command completion, add the following to your shell configuration file
 |--------------|---------------------------------------------------------------------------------------|
 | Description  | `#@description: Your command description`                                             |
 | Arguments    | `#@arg:name - Argument description`                                                   |
+| Arguments    | `#@arg:name - Required argument with default [default:value]`                         |
+| Arguments    | `#@arg:name - Argument with allowed values [options:val1\|val2]`                      |
 | Catch-all    | `#@arg:... - Additional arguments description`                                        |
+| Catch-all    | `#@arg:...name - Named catch-all arguments`                                            |
+| Catch-all    | `#@arg:...files - Required named catch-all [required]`                                 |
 | Flags        | `#@flag:name - Flag with default value [default:value]`                               |
 | Flags        | `#@flag:name - Boolean flag [bool]`                                                   |
 | Flags        | `#@flag:name - Flag with allowed values [options:allowed-value\|other-allowed-value]` |
@@ -103,6 +107,8 @@ To enable command completion, add the following to your shell configuration file
 | Flags        | `#@flag:name - Flag with any path completion [path]`                                  |
 | Flags        | `#@flag:name - Flag with any path completion from directory [path:~/path]`            |
 | Flags        | `#@flag:name - Flag with any path completion with env override [path:~/path:ENV_VAR]` |
+
+Positional arguments (`#@arg:`) are required by default unless they have a `default` value or are catch-all (`#@arg:...`). Catch-all arguments are optional by default but can be made required with `[required]`. Setting both `required` and `default` is contradictory -- `required` will be ignored.
 
 The `file`, `dir`, and `path` annotations support an optional environment variable override. If the env var is set, it will be used instead of the default path for shell completion. Example:
 

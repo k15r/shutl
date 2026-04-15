@@ -15,11 +15,11 @@ pub fn execute_script(script_path: &Path, matches: &ArgMatches) -> std::io::Resu
             LineType::Positional(name, _, config) => {
                 if let Some(ArgType::CatchAll) = config.arg_type {
                     debug!("catch-all: {}", name);
-                    if let Some(values) = matches.get_many::<String>("additional-args") {
-                        debug!("additional-args: {:?}", values);
+                    let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());
+                    if let Some(values) = matches.get_many::<String>(name.as_str()) {
                         let env_value = values.map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
-                        debug!("additional-args: {:?}", env_value);
-                        command.env("SHUTL_ADDITIONAL_ARGS", env_value);
+                        debug!("{}: {:?}", env_name, env_value);
+                        command.env(&env_name, env_value);
                     }
                 } else {
                     let env_name = format!("SHUTL_{}", name.replace('-', "_").to_uppercase());

@@ -111,9 +111,13 @@ fn build_script_command(name: String, path: &Path) -> CommandWithPath {
 
                 if let Some(ArgType::CatchAll) = cfg.arg_type {
                     arg = arg.num_args(1..).action(clap::ArgAction::Append);
-                    arg = arg.required(false);
+                    arg = arg.required(cfg.required);
                 } else {
                     arg = add_path_completer(arg, cfg);
+                }
+
+                if cfg.required {
+                    arg = arg.required(true);
                 }
 
                 cmd = cmd.arg(arg);
@@ -1424,6 +1428,107 @@ mod tests {
         let completions =
             complete_script_names_in_dir(std::ffi::OsStr::new("nonexistent/"), scripts_dir);
         assert!(completions.is_empty());
+    }
+
+    #[test]
+    fn test_required_catchall_arg() {
+        let script_content = r#"#!/bin/bash
+#@description: Test required catch-all
+#@arg:... - Additional arguments [required]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
+        let catchall = args
+            .iter()
+            .find(|a| a.get_id() == "additional-args")
+            .unwrap();
+        assert!(catchall.is_required_set());
+
+        // Should fail without arguments
+        let result = cmd_with_path
+            .command
+            .clone()
+            .try_get_matches_from(vec!["test"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_optional_catchall_arg() {
+        let script_content = r#"#!/bin/bash
+#@description: Test optional catch-all
+#@arg:... - Additional arguments
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
+        let catchall = args
+            .iter()
+            .find(|a| a.get_id() == "additional-args")
+            .unwrap();
+        assert!(!catchall.is_required_set());
+
+        // Should succeed without arguments
+        let result = cmd_with_path
+            .command
+            .clone()
+            .try_get_matches_from(vec!["test"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_named_catchall_arg() {
+        let script_content = r#"#!/bin/bash
+#@description: Test named catch-all
+#@arg:...files - Files to process [required]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
+        let catchall = args.iter().find(|a| a.get_id() == "files").unwrap();
+        assert!(catchall.is_required_set());
+        assert_eq!(catchall.get_help().unwrap().to_string(), "Files to process");
+
+        // Should fail without arguments, error should mention "files"
+        let result = cmd_with_path
+            .command
+            .clone()
+            .try_get_matches_from(vec!["test"]);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("<files>"),
+            "Error should mention 'files', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_unnamed_catchall_defaults_to_additional_args() {
+        let script_content = r#"#!/bin/bash
+#@description: Test unnamed catch-all
+#@arg:... - Extra args
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let cmd_with_path = build_script_command("test".to_string(), &script_path);
+
+        let args: Vec<_> = cmd_with_path.command.get_arguments().collect();
+        let catchall = args
+            .iter()
+            .find(|a| a.get_id() == "additional-args")
+            .unwrap();
+        assert!(!catchall.is_required_set());
     }
 
     #[test]

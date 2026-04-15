@@ -94,12 +94,16 @@ fn parse_argument(name: &str, rest: &str) -> (String, String, Config) {
     // extract annotations from the description
     // and remove them from the description
     // e.g. "description [dir,default:output.txt]" -> "description"
-    if name == "..." {
-        let cfg = Config {
-            arg_type: Some(ArgType::CatchAll),
-            ..Default::default()
+    if let Some(catchall_name) = name.strip_prefix("...") {
+        let (description, annotations) = extract_annotations(rest);
+        let mut cfg = parse_annotations(annotations).unwrap_or_default();
+        cfg.arg_type = Some(ArgType::CatchAll);
+        let resolved_name = if catchall_name.is_empty() {
+            "additional-args".to_string()
+        } else {
+            catchall_name.to_string()
         };
-        return ("additional-args".to_string(), rest.trim().to_string(), cfg);
+        return (resolved_name, description.trim().to_string(), cfg);
     }
     let (description, annotations) = extract_annotations(rest);
     let clean_description = description.trim().to_string();
@@ -472,6 +476,57 @@ mod tests {
                         path: PathBuf::from("/etc"),
                         env_var: Some("CONFIG_DIR".to_string()),
                     }),
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_named_catchall_arg() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@arg:...files - Files to process [required]
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.arguments.len(), 1);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "files".to_string(),
+                "Files to process".to_string(),
+                Config {
+                    arg_type: Some(ArgType::CatchAll),
+                    required: true,
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_unnamed_catchall_arg() {
+        let script_content = r#"#!/bin/bash
+#@description: Test script
+#@arg:... - Extra arguments
+"#;
+
+        let dir = tempdir().unwrap();
+        let script_path = create_test_script(&dir.path(), "test.sh", script_content);
+        let metadata = parse_command_metadata(&script_path);
+
+        assert_eq!(metadata.arguments.len(), 1);
+        assert_eq!(
+            metadata.arguments[0],
+            LineType::Positional(
+                "additional-args".to_string(),
+                "Extra arguments".to_string(),
+                Config {
+                    arg_type: Some(ArgType::CatchAll),
                     ..Default::default()
                 }
             )
