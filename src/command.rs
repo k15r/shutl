@@ -1465,7 +1465,11 @@ mod tests {
             .try_get_matches_from(vec!["test"]);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("<files>"), "Error should mention 'files', got: {}", err_msg);
+        assert!(
+            err_msg.contains("<files>"),
+            "Error should mention 'files', got: {}",
+            err_msg
+        );
     }
 
     #[test]
