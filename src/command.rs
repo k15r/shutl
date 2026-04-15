@@ -537,9 +537,16 @@ fn format_flat(entries: &[ListEntry]) -> String {
         .join("\n")
 }
 
+use std::io::IsTerminal;
+
+fn use_color() -> bool {
+    std::io::stdout().is_terminal()
+}
+
 fn format_tree(entries: &[ListEntry]) -> String {
     let mut lines = Vec::new();
-    let mut current_dir: Option<String> = None;
+    let mut printed_dirs: Vec<String> = Vec::new();
+    let color = use_color();
     let max_name_len = entries
         .iter()
         .map(|e| e.path.rsplit('/').next().unwrap_or(&e.path).len())
@@ -547,34 +554,67 @@ fn format_tree(entries: &[ListEntry]) -> String {
         .unwrap_or(0);
 
     for entry in entries {
-        if let Some(slash_pos) = entry.path.rfind('/') {
-            let dir = &entry.path[..slash_pos];
-            let name = &entry.path[slash_pos + 1..];
-            if current_dir.as_deref() != Some(dir) {
-                lines.push(format!("{}/", dir));
-                current_dir = Some(dir.to_string());
+        let parts: Vec<&str> = entry.path.rsplitn(2, '/').collect();
+        if parts.len() == 2 {
+            let dir_path = parts[1];
+            let name = parts[0];
+
+            // Print any directory headers not yet printed
+            let components: Vec<&str> = dir_path.split('/').collect();
+            for depth in 0..components.len() {
+                let ancestor: String = components[..=depth].join("/");
+                if !printed_dirs.contains(&ancestor) {
+                    let indent = "  ".repeat(depth);
+                    let dir_label = if color {
+                        format!("\x1b[1;34m{}/\x1b[0m", components[depth])
+                    } else {
+                        format!("{}/", components[depth])
+                    };
+                    lines.push(format!("{}{}", indent, dir_label));
+                    printed_dirs.push(ancestor);
+                }
             }
-            if entry.description.is_empty() {
-                lines.push(format!("  {}", name));
+
+            let indent = "  ".repeat(components.len());
+            let styled_name = if color {
+                format!("\x1b[32m{}\x1b[0m", name)
             } else {
+                name.to_string()
+            };
+            if entry.description.is_empty() {
+                lines.push(format!("{}{}", indent, styled_name));
+            } else {
+                // Pad based on raw name length, then apply color
+                let padding = max_name_len.saturating_sub(name.len());
+                let desc = if color {
+                    format!("\x1b[2m{}\x1b[0m", entry.description)
+                } else {
+                    entry.description.clone()
+                };
                 lines.push(format!(
-                    "  {:<width$}  {}",
-                    name,
-                    entry.description,
-                    width = max_name_len
+                    "{}{}{}  {}",
+                    indent,
+                    styled_name,
+                    " ".repeat(padding),
+                    desc
                 ));
             }
         } else {
-            current_dir = None;
-            if entry.description.is_empty() {
-                lines.push(entry.path.clone());
+            let styled_name = if color {
+                format!("\x1b[32m{}\x1b[0m", entry.path)
             } else {
-                lines.push(format!(
-                    "{:<width$}  {}",
-                    entry.path,
-                    entry.description,
-                    width = max_name_len
-                ));
+                entry.path.clone()
+            };
+            if entry.description.is_empty() {
+                lines.push(styled_name.to_string());
+            } else {
+                let padding = max_name_len.saturating_sub(entry.path.len());
+                let desc = if color {
+                    format!("\x1b[2m{}\x1b[0m", entry.description)
+                } else {
+                    entry.description.clone()
+                };
+                lines.push(format!("{}{}  {}", styled_name, " ".repeat(padding), desc));
             }
         }
     }
@@ -1545,6 +1585,19 @@ mod tests {
             "#!/bin/bash\n#@description: Push image to registry",
         );
 
+        let compose_dir = docker_dir.join("compose");
+        fs::create_dir(&compose_dir).unwrap();
+        create_test_script(
+            &compose_dir,
+            "up.sh",
+            "#!/bin/bash\n#@description: Start services",
+        );
+        create_test_script(
+            &compose_dir,
+            "down.sh",
+            "#!/bin/bash\n#@description: Stop services",
+        );
+
         create_test_script(
             scripts_dir,
             "hello.sh",
@@ -1553,14 +1606,18 @@ mod tests {
 
         let output = list_scripts(scripts_dir, None, true);
         let lines: Vec<&str> = output.lines().collect();
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines.len(), 7);
         assert_eq!(lines[0], "docker/");
-        assert!(lines[1].contains("build"));
-        assert!(lines[1].contains("Build a Docker image"));
-        assert!(lines[2].contains("push"));
-        assert!(lines[2].contains("Push image to registry"));
-        assert!(lines[3].contains("hello"));
-        assert!(lines[3].contains("Say hello"));
+        assert!(lines[1].starts_with("  build"));
+        assert_eq!(lines[2], "  compose/");
+        assert!(lines[3].starts_with("    down"));
+        assert!(lines[3].contains("Stop services"));
+        assert!(lines[4].starts_with("    up"));
+        assert!(lines[4].contains("Start services"));
+        assert!(lines[5].starts_with("  push"));
+        assert!(lines[5].contains("Push image to registry"));
+        assert!(lines[6].starts_with("hello"));
+        assert!(lines[6].contains("Say hello"));
     }
 
     #[test]
