@@ -17,6 +17,7 @@ fn main() {
         Some(("new", sub_matches)) => builtin::handle_new(sub_matches),
         Some(("edit", sub_matches)) => builtin::handle_edit(sub_matches),
         Some(("list", sub_matches)) => builtin::handle_list(sub_matches),
+        Some(("validate", sub_matches)) => builtin::handle_validate(sub_matches),
         Some((command, sub_matches)) => execute_command(command, sub_matches),
         None => {
             cli_for_help.print_help().unwrap();
