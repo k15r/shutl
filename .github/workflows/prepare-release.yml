@@ -24,7 +24,7 @@ jobs:
     name: Bump Version and Create PR
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Bump Version
         id: bump_version
